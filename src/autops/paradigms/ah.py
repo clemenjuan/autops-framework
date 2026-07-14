@@ -54,8 +54,15 @@ class AutonomousHybrid(Paradigm):
         else:
             planned = self._active.pop(0)
             selected = onboard_mode if onboard_mode in {"charging", "safe"} else planned
+        onboard_satellite = onboard_actions.get("eventsat_0", {})
+        compute = (
+            {"jetson_planned": onboard_satellite["jetson_planned"]}
+            if isinstance(onboard_satellite, dict) and "jetson_planned" in onboard_satellite
+            else {}
+        )
+        actions = onboard_actions if selected == onboard_mode else mode_action(selected, **compute)
         return ParadigmDecision(
-            mode_action(selected),
+            actions,
             latency,
             ground_latency_s=ground_latency,
             rationale=self.onboard.last_rationale,

@@ -1,0 +1,130 @@
+scenario_name: ssa
+scenario_version: "2.0"
+description: Link-gated debris-custody constellation benchmark
+
+simulation:
+  timestep_s: 60
+  max_steps: 10080
+  epoch: "2026-06-01T00:00:00Z"
+
+constellation:
+  size: 20
+  benchmark_sizes: [20, 100]
+  calibration_sizes: [1, 3]
+  share_plane: true
+  in_plane_spacing_deg: 2.0
+
+orbit:
+  type: SSO
+  altitude_km: 775
+  inclination_deg: 98.6
+  eccentricity: 0.001
+  raan_deg: 0.0
+  arg_perigee_deg: 0.0
+  orbital_period_s: 6012
+  eclipse_fraction: 0.31
+  propagator: j2
+  launch_lottery: true
+
+power:
+  solar_panels:
+    config: microsat body-mounted array
+    generation_peak_w: 120.0
+    panel_efficiency_factor: 1.0
+  battery:
+    count: 1
+    capacity_wh: 300.0
+    initial_soc: 0.8
+    min_soc: 0.2
+    max_soc: 1.0
+    charge_efficiency: 0.9
+  consumption:
+    charging: {sun_w: 9.6, eclipse_w: 9.2}
+    payload_observe: {sun_w: 25.4, eclipse_w: 25.0}
+    payload_detect: {sun_w: 30.2, eclipse_w: 29.8}
+    communication: {sun_w: 61.0, eclipse_w: 60.6}
+    safe: {sun_w: 12.0, eclipse_w: 12.0}
+    detumbling: {sun_w: 5.0, eclipse_w: 4.6}
+
+communications:
+  xband:
+    downlink_rate_kbps: 50000
+    uplink_rate_kbps: 2000
+  ground_station:
+    name: Ottobrunn
+    latitude_deg: 48.0483
+    longitude_deg: 11.6567
+    min_elevation_deg: 10.0
+  passes:
+    min_per_day: 2
+    max_per_day: 3
+    min_duration_s: 22
+    max_duration_s: 422
+
+storage:
+  obc_capacity_mb: 4096
+  jetson_capacity_mb: 249036.8
+  observation_size_mb: 2016
+
+payload:
+  observation_duration_s: 60
+  detection_time_s: 300
+
+modes:
+  available: [charging, communication, payload_observe, payload_detect, isl_share, safe]
+  default: charging
+  constraints:
+    communication: {requires_ground_pass: true, requires_fine_pointing: true}
+    payload_observe: {requires_eclipse: false, min_battery_soc: 0.3}
+    payload_detect: {min_battery_soc: 0.3}
+    isl_share: {min_battery_soc: 0.3}
+  transition_overhead:
+    settling_time_s: 135.0
+    discretization: floor
+    attitude_maneuver_modes: [payload_observe, communication]
+
+ssa:
+  collective_negative: true
+  collective_weight: 1.0
+  isl_relay: true
+  isl_min_soc: 0.3
+  record_size_kb: 10.0
+  custody_tau_steps: 4320
+  relay_preemption_age_steps: 540
+  prefer_orekit_positions: false
+
+targets:
+  count: 100
+  parent_altitude_km: 805.0
+  parent_inclination_deg: 98.6
+  raan_spread_deg: 0.3
+  sigma_dv_along_ms: 13.0
+  sigma_dv_normal_ms: 26.0
+  size_power_law_bounds_m: [0.01, 0.10]
+  fov_half_angle_deg: 1.9
+  boresight_pitch_deg: 12.0
+  r_cap_km: 150.0
+  m_lim: 15.0
+  sigma_m: 0.5
+  albedo: 0.13
+  prefer_orekit: false
+
+isl:
+  frequency_hz: 437000000.0
+  tx_power_w: 2.0
+  tx_gain_db: 2.15
+  rx_gain_db: 2.15
+  tx_loss_db: 3.0
+  rx_loss_db: 0.5
+  bandwidth_hz: 9600.0
+  symbol_rate_hz: 9600.0
+  modulation_order: 4
+  sensitivity_dbw: -132.0
+  noise_temperature_k: 290.0
+  substep_resolution_s: 10.0
+  power_overhead_w: 5.0
+  unicast: true
+
+organisation_defaults:
+  hmas:
+    branching_factor: 10

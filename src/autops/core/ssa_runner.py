@@ -5,7 +5,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
-from autops.config import ExperimentSpec, deep_merge, repository_root
+from autops.config import ExperimentSpec, asset_root, deep_merge
 from autops.core.provenance import collect_provenance
 from autops.missions.eventsat.metrics import experiment_statistics
 from autops.missions.ssa.env import SSAEnvironment
@@ -21,9 +21,7 @@ def _episode_config(spec: ExperimentSpec) -> dict[str, Any]:
 
 
 def _organisation_config(spec: ExperimentSpec) -> dict[str, Any]:
-    defaults = (
-        spec.mission_config.get("organisation_defaults", {}).get(spec.organisation, {})
-    )
+    defaults = spec.mission_config.get("organisation_defaults", {}).get(spec.organisation, {})
     config = deep_merge(defaults, spec.organisation_config)
     policy = dict(config.get("policy", {}))
     custody = spec.mission_config.get("ssa", {}).get("custody_tau_steps", 4320)
@@ -65,11 +63,10 @@ def _run_episode(spec: ExperimentSpec, episode_id: int, seed: int) -> dict[str, 
 def run_ssa_experiment(spec: ExperimentSpec) -> dict[str, Any]:
     """Run a paired-seed SSA experiment and return the shared result envelope."""
 
-    episodes = [
-        _run_episode(spec, episode_id, seed)
-        for episode_id, seed in enumerate(spec.seeds)
-    ]
-    statistics = experiment_statistics([episode["metrics"] for episode in episodes])
+    episodes = [_run_episode(spec, episode_id, seed) for episode_id, seed in enumerate(spec.seeds)]
+    statistics = experiment_statistics(
+        [episode["metrics"] for episode in episodes], include_robustness=False
+    )
     mean_metrics = statistics["mean"]
     return {
         "schema_version": 1,
@@ -78,7 +75,7 @@ def run_ssa_experiment(spec: ExperimentSpec) -> dict[str, Any]:
         "metrics": mean_metrics,
         "statistics": statistics,
         "episodes": episodes,
-        "provenance": collect_provenance(spec.model_dump(mode="json"), repository_root()),
+        "provenance": collect_provenance(spec.model_dump(mode="json"), asset_root()),
     }
 
 

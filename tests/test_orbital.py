@@ -97,6 +97,41 @@ def test_seeded_fallback_is_reproducible_and_local(
     assert 2 <= len(first.ground_passes) <= 3
 
 
+def test_orekit_failure_uses_honestly_labelled_seeded_fallback(
+    orbit: OrbitElements,
+    fallback: SimplifiedModel,
+    station: GroundStation,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail(_orbit: OrbitElements) -> None:
+        raise RuntimeError("Eckstein-Hechler construction failed")
+
+    monkeypatch.setattr(orekit, "create_propagator", fail)
+    context = build_orbital_context(
+        orbit,
+        fallback,
+        station,
+        downlink_rate_kbps=50.0,
+        step_s=60.0,
+        total_steps=10,
+        seed=7,
+    )
+    assert context.backend == "simplified"
+    assert context.propagator_kind == "phase-and-seeded-passes"
+
+    with pytest.raises(RuntimeError, match="required Orekit propagation failed"):
+        build_orbital_context(
+            orbit,
+            fallback,
+            station,
+            downlink_rate_kbps=50.0,
+            step_s=60.0,
+            total_steps=10,
+            seed=7,
+            require_orekit=True,
+        )
+
+
 def test_fallback_uses_exact_seconds_and_supplied_rate(
     orbit: OrbitElements,
     station: GroundStation,

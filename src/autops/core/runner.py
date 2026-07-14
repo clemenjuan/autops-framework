@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from autops.config import ExperimentSpec, repository_root
+from autops.config import ExperimentSpec, asset_root, runtime_root
 from autops.core.plugin import create_representation
 from autops.core.provenance import collect_provenance
 from autops.memory.fixed import FixedMemory
@@ -54,10 +54,12 @@ class ExperimentRunner:
             self.spec.timestep_s,
         )
         total_reward = 0.0
+        planner_compute_energy_wh = 0.0
         while int(observation["step"]) < self.spec.steps:
             decision = paradigm.act(observation, physical_contact=env.physical_contact_active())
             step = env.step(decision.actions)
             total_reward += step.reward
+            planner_compute_energy_wh += float(step.info.get("planner_compute_energy_wh", 0.0))
             collector.record(
                 step.info,
                 decision_latency_s=decision.latency_s,
@@ -74,6 +76,7 @@ class ExperimentRunner:
             "seed": seed,
             "steps": int(observation["step"]),
             "total_reward": total_reward,
+            "planner_compute_energy_wh": planner_compute_energy_wh,
             "metrics": collector.aggregate(),
             "provenance": env.episode_provenance(),
             "decision_diagnostics": self._decision_diagnostics(paradigm),
@@ -126,20 +129,44 @@ class ExperimentRunner:
         self, episodes: list[dict[str, Any]], statistics: dict[str, dict[str, float]]
     ) -> dict[str, Any]:
         mean_metrics = statistics["mean"]
+        experiment = self.spec.model_dump(mode="json")
+        if self.spec.onboard_token == "lewm-cem":
+            identities = []
+            for episode in episodes:
+                diagnostics = episode.get("decision_diagnostics", {}).get("onboard", {})
+                artifact = diagnostics.get("artifact_identity")
+                checkpoint = diagnostics.get("checkpoint_identity")
+                if not isinstance(artifact, dict) or not isinstance(checkpoint, dict):
+                    raise ValueError("LeWM result lacks planner artifact identity")
+                identities.append(
+                    {
+                        "schema_version": artifact.get("schema_version"),
+                        "artifact_sha256": artifact.get("sha256"),
+                        "trace_sha256": artifact.get("trace_sha256"),
+                        "checkpoint_sha256": checkpoint.get("sha256"),
+                    }
+                )
+            if any(identity != identities[0] for identity in identities[1:]):
+                raise ValueError("LeWM episodes used inconsistent planner artifacts")
+            experiment["planner_artifact_identity"] = identities[0]
         return {
             "schema_version": 1,
-            "experiment": self.spec.model_dump(mode="json"),
+            "experiment": experiment,
             "metric_registry": METRIC_IDS,
             "metrics": {
                 metric_id: mean_metrics.get(name, 0.0) for metric_id, name in METRIC_IDS.items()
             },
             "statistics": statistics,
             "episodes": episodes,
-            "provenance": collect_provenance(self.spec.model_dump(mode="json"), repository_root()),
+            "provenance": collect_provenance(experiment, asset_root()),
         }
 
     def _write_result(self, result: dict[str, Any]) -> Path:
-        root = repository_root() / self.spec.output_root / self.spec.name
+        digest = str(result.get("provenance", {}).get("config_sha256", ""))
+        if len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest):
+            raise ValueError("result provenance must contain a lowercase config SHA-256")
+        coordinate = Path(*self.spec.coordinate.split("/"))
+        root = runtime_root() / self.spec.output_root / coordinate / digest[:12]
         root.mkdir(parents=True, exist_ok=True)
         destination = root / "results.json"
         temporary = root / ".results.json.tmp"

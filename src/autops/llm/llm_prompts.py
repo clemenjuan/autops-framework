@@ -1,4 +1,5 @@
 # ruff: noqa
+# fmt: off
 """
 LLM Prompt Templates for EventSat.
 
@@ -259,3 +260,4 @@ def format_schedule_prompt(state: Dict[str, Any], gap_steps: int) -> str:
         'Respond with JSON: {"mode": "<contact_mode>", "schedule": [["<mode>", <steps>], ...], "rationale": "<why>"}',
     ])
     return "\n".join(lines)
+# fmt: on

@@ -1,4 +1,5 @@
 # ruff: noqa
+# fmt: off
 """
 Agentic Prompt Templates for CoALA-style EventSat Representation.
 
@@ -609,3 +610,4 @@ def format_forced_schedule_prompt(
         '"rationale": "<why>"}}'
     )
     return "\n".join(lines)
+# fmt: on

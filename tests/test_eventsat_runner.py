@@ -11,7 +11,7 @@ from autops.core.runner import ExperimentRunner
 from autops.core.types import DecisionContext
 from autops.missions.eventsat.env import EventSatEnvironment
 from autops.missions.eventsat.metrics import METRIC_IDS
-from autops.paradigms.base import refresh_almanac
+from autops.paradigms.base import ParadigmDecision, refresh_almanac
 from autops.representations.symb import EventSatSymbolicScheduler
 
 
@@ -116,3 +116,48 @@ def test_eventsat_ag_symbolic_runner_exposes_all_fourteen_metrics() -> None:
     assert result["episodes"][0]["steps"] == 24
     assert result["episodes"][0]["provenance"]["orbital_backend"] == "simplified"
     assert all(isinstance(value, float) for value in result["metrics"].values())
+
+
+def test_runner_persists_planner_diagnostics_and_existing_compute_energy(
+    monkeypatch,
+) -> None:
+    class FakeOnboard:
+        def diagnostics(self) -> dict[str, int]:
+            return {"planning_events": 3}
+
+    class FakeParadigm:
+        onboard = FakeOnboard()
+
+        def reset(self, seed: int, observation: dict) -> None:
+            del seed, observation
+
+        def act(self, observation: dict, *, physical_contact: bool) -> ParadigmDecision:
+            del observation, physical_contact
+            return ParadigmDecision(
+                {
+                    "eventsat_0": {
+                        "mode": "charging",
+                        "jetson_planned": True,
+                        "planner_power_w": 6.0,
+                    }
+                }
+            )
+
+        def after_step(self, info: dict, observation: dict) -> None:
+            del info, observation
+
+    monkeypatch.setattr(ExperimentRunner, "_build_paradigm", lambda self: FakeParadigm())
+    spec = expand_coordinate(
+        "eventsat/sas/ag/symb",
+        episodes=1,
+        steps=3,
+        seeds=[17],
+        overrides={"mission": {"anomalies": {"probability_per_step": 0.0}}},
+    )
+
+    result = ExperimentRunner(spec, save=False, prefer_orekit=False).run()
+    episode = result["episodes"][0]
+
+    assert episode["planner_compute_energy_wh"] == pytest.approx(0.3)
+    assert episode["decision_diagnostics"]["onboard"] == {"planning_events": 3}
+    assert "planner_compute_energy_wh" not in result["metric_registry"].values()

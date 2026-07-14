@@ -6,21 +6,49 @@ import hashlib
 import json
 import platform
 import subprocess
-from importlib.metadata import PackageNotFoundError, version
+from importlib.metadata import PackageNotFoundError, distribution, version
 from pathlib import Path
 from typing import Any
 
 
+def scientific_config_sha256(config: dict[str, Any]) -> str:
+    """Hash scientific inputs while deliberately ignoring output placement."""
+
+    scientific = {key: value for key, value in config.items() if key != "output_root"}
+    return hashlib.sha256(json.dumps(scientific, sort_keys=True, default=str).encode()).hexdigest()
+
+
 def collect_provenance(config: dict[str, Any], root: Path) -> dict[str, Any]:
+    commit = _git(root, "rev-parse", "HEAD")
+    source_revision = commit or _package_revision()
     return {
-        "config_sha256": hashlib.sha256(
-            json.dumps(config, sort_keys=True, default=str).encode()
-        ).hexdigest(),
-        "git_commit": _git(root, "rev-parse", "HEAD"),
-        "git_dirty": bool(_git(root, "status", "--porcelain")),
+        "config_sha256": scientific_config_sha256(config),
+        "source_revision": source_revision,
+        "source_kind": "git" if commit else "installed-package",
+        "git_commit": commit,
+        "git_dirty": bool(_git(root, "status", "--porcelain")) if commit else False,
         "python": platform.python_version(),
-        "dependencies": {name: _version(name) for name in ("numpy", "pydantic", "pyyaml")},
+        "dependencies": {
+            name: _version(name)
+            for name in (
+                "numpy",
+                "pydantic",
+                "pyyaml",
+                "torch",
+                "orekit-jpype",
+                "openai",
+                "requests",
+            )
+        },
     }
+
+
+def _package_revision() -> str | None:
+    try:
+        record = distribution("autops-framework").read_text("RECORD")
+    except PackageNotFoundError:
+        return None
+    return hashlib.sha256(record.encode()).hexdigest() if record else None
 
 
 def _git(root: Path, *args: str) -> str | None:
@@ -43,3 +71,6 @@ def _version(name: str) -> str | None:
         return version(name)
     except PackageNotFoundError:
         return None
+
+
+__all__ = ["collect_provenance", "scientific_config_sha256"]

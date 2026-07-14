@@ -34,6 +34,10 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/autops"]
 
+[tool.hatch.build.targets.wheel.force-include]
+"configs" = "autops/configs"
+"orekit-data.zip" = "autops/orekit-data.zip"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [

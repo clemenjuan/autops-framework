@@ -168,7 +168,9 @@ class EventSatMetrics:
         return count
 
 
-def experiment_statistics(episodes: list[dict[str, float]]) -> dict[str, dict[str, float]]:
+def experiment_statistics(
+    episodes: list[dict[str, float]], *, include_robustness: bool = True
+) -> dict[str, dict[str, float]]:
     keys = sorted({key for episode in episodes for key in episode})
     means: dict[str, float] = {}
     deviations: dict[str, float] = {}
@@ -176,9 +178,10 @@ def experiment_statistics(episodes: list[dict[str, float]]) -> dict[str, dict[st
         values = [float(episode.get(key, 0.0)) for episode in episodes]
         means[key] = mean(values)
         deviations[key] = stdev(values) if len(values) > 1 else 0.0
-    utility_mean = means.get("utility", 0.0)
-    means["robustness_cv"] = (
-        deviations.get("utility", 0.0) / utility_mean if utility_mean > 0 else 0.0
-    )
-    means["m_09"] = means["robustness_cv"]
+    if include_robustness:
+        utility_mean = means.get("utility", 0.0)
+        means["robustness_cv"] = (
+            deviations.get("utility", 0.0) / utility_mean if utility_mean > 0 else 0.0
+        )
+        means["m_09"] = means["robustness_cv"]
     return {"mean": means, "std": deviations}

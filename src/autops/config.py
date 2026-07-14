@@ -16,9 +16,30 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
-def repository_root() -> Path:
+def runtime_root() -> Path:
+    """Return the writable runtime root, never an implicit package directory."""
+
     override = os.environ.get("AUTOPS_ROOT")
-    return Path(override).expanduser().resolve() if override else Path(__file__).parents[2]
+    if override:
+        return Path(override).expanduser().resolve()
+    return Path.cwd().resolve()
+
+
+def asset_root() -> Path:
+    """Locate immutable packaged/source assets independently of runtime output."""
+
+    override = os.environ.get("AUTOPS_ROOT")
+    if override:
+        candidate = Path(override).expanduser().resolve()
+        if (candidate / "configs").is_dir():
+            return candidate
+    source_checkout = Path(__file__).resolve().parents[2]
+    if (source_checkout / "configs").is_dir():
+        return source_checkout
+    installed_package = Path(__file__).resolve().parent
+    if (installed_package / "configs").is_dir():
+        return installed_package
+    raise FileNotFoundError("AUTOPS configs are absent; set AUTOPS_ROOT to a source checkout")
 
 
 def load_yaml(path: Path) -> dict[str, Any]:
@@ -34,6 +55,26 @@ def deep_merge(base: dict[str, Any], update: dict[str, Any]) -> dict[str, Any]:
     for key, value in update.items():
         if isinstance(value, dict) and isinstance(merged.get(key), dict):
             merged[key] = deep_merge(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
+
+
+def strict_deep_merge(
+    base: dict[str, Any], update: dict[str, Any], *, path: str = "mission"
+) -> dict[str, Any]:
+    """Merge a mission override while rejecting unknown keys at every depth."""
+
+    merged = dict(base)
+    for key, value in update.items():
+        qualified = f"{path}.{key}"
+        if key not in base:
+            raise ValueError(f"Unknown mission override key {qualified!r}")
+        original = base[key]
+        if isinstance(value, dict):
+            if not isinstance(original, dict):
+                raise ValueError(f"Cannot descend into non-mapping mission key {qualified!r}")
+            merged[key] = strict_deep_merge(original, value, path=qualified)
         else:
             merged[key] = value
     return merged
@@ -126,17 +167,15 @@ class ExperimentSpec(BaseModel):
     constellation_size: int = Field(default=1, ge=1)
     mission_config: dict[str, Any] = Field(default_factory=dict)
     representation_config: dict[str, Any] = Field(default_factory=dict)
-    paradigm_config: dict[str, Any] = Field(default_factory=dict)
     organisation_config: dict[str, Any] = Field(default_factory=dict)
-    metrics_config: dict[str, Any] = Field(default_factory=dict)
     output_root: Path = Path("results")
 
     @model_validator(mode="after")
     def validate_contract(self) -> ExperimentSpec:
         if len(self.seeds) != self.episodes:
             raise ValueError("seeds must contain exactly one paired seed per episode")
-        if self.output_root.is_absolute():
-            raise ValueError("output_root must be repository-relative")
+        if self.output_root.is_absolute() or ".." in self.output_root.parts:
+            raise ValueError("output_root must be a safe relative path without ..")
         if self.paradigm == "ah":
             if not self.onboard_representation or not self.ground_representation:
                 raise ValueError("ah requires explicit onboard and ground representations")
@@ -205,13 +244,26 @@ def expand_coordinate(
     overrides: dict[str, Any] | None = None,
     root: Path | None = None,
 ) -> ExperimentSpec:
-    root = root or repository_root()
+    root = root or asset_root()
+    if overrides is not None and not isinstance(overrides, dict):
+        raise ValueError("overrides must be a mapping")
+    selected_overrides = overrides or {}
+    allowed_overrides = {"mission", "representation", "organisation", "output_root"}
+    unknown_overrides = set(selected_overrides) - allowed_overrides
+    if unknown_overrides:
+        raise ValueError(f"Unknown top-level override keys: {sorted(unknown_overrides)}")
+    for section in ("mission", "representation", "organisation"):
+        value_override = selected_overrides.get(section, {})
+        if not isinstance(value_override, dict):
+            raise ValueError(f"Override section {section!r} must be a mapping")
+    output_override = selected_overrides.get("output_root", "results")
+    if not isinstance(output_override, (str, os.PathLike)):
+        raise ValueError("Override output_root must be a path string")
     matrix = load_yaml(root / "configs" / "matrix.yaml")
     coord = parse_coordinate(value)
     _validate_coordinate(coord, matrix)
     mission_config = load_yaml(root / "configs" / "missions" / f"{coord.mission}.yaml")
-    if overrides:
-        mission_config = deep_merge(mission_config, overrides.get("mission", {}))
+    mission_config = strict_deep_merge(mission_config, selected_overrides.get("mission", {}))
     default_steps = int(mission_config.get("simulation", {}).get("max_steps", 10080))
     default_size = int(mission_config.get("constellation", {}).get("size", 1))
     episode_seeds = list(seeds) if seeds is not None else list(range(42, 42 + episodes))
@@ -232,9 +284,7 @@ def expand_coordinate(
         seeds=episode_seeds,
         constellation_size=default_size if constellation_size is None else constellation_size,
         mission_config=mission_config,
-        representation_config=(overrides or {}).get("representation", {}),
-        paradigm_config=(overrides or {}).get("paradigm", {}),
-        organisation_config=(overrides or {}).get("organisation", {}),
-        metrics_config=(overrides or {}).get("metrics", {}),
-        output_root=Path((overrides or {}).get("output_root", "results")),
+        representation_config=selected_overrides.get("representation", {}),
+        organisation_config=selected_overrides.get("organisation", {}),
+        output_root=Path(output_override),
     )

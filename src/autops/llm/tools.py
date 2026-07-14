@@ -64,9 +64,7 @@ def _get_pipeline_bottleneck(state: dict[str, Any]) -> str:
     return "none"
 
 
-def check_constraints(
-    state: dict[str, Any], proposed_mode: str = "charging"
-) -> dict[str, Any]:
+def check_constraints(state: dict[str, Any], proposed_mode: str = "charging") -> dict[str, Any]:
     """Validate a candidate against declared telemetry, without changing state."""
 
     violations: list[dict[str, str]] = []
@@ -104,9 +102,7 @@ def check_constraints(
         productive = _number(state, "obc_data_mb", 0.0) > 0
     elif proposed_mode == "payload_observe":
         capacity = _number(state, "jetson_capacity_mb", 249036.8)
-        stored = _number(state, "jetson_raw_mb", 0.0) + _number(
-            state, "jetson_compressed_mb", 0.0
-        )
+        stored = _number(state, "jetson_raw_mb", 0.0) + _number(state, "jetson_compressed_mb", 0.0)
         productive = stored + _number(state, "observation_size_mb", 9.41) <= capacity
         if not productive:
             violations.append(
@@ -136,9 +132,7 @@ def _get_feasible_modes(state: dict[str, Any]) -> list[str]:
     return [mode for mode in MODES if check_constraints(state, mode)["feasible"]]
 
 
-def evaluate_plan(
-    state: dict[str, Any], proposed_mode: str = "charging"
-) -> dict[str, Any]:
+def evaluate_plan(state: dict[str, Any], proposed_mode: str = "charging") -> dict[str, Any]:
     """Score only incremental physically deliverable value, with no mode bonus."""
 
     constraints = check_constraints(state, proposed_mode)
@@ -173,10 +167,7 @@ def evaluate_plan(
         )
         if proposed_mode != "communication" and future_capacity > 0:
             utility = min(progress_mb, future_capacity) / future_capacity
-    risks = [
-        item["reason"]
-        for item in constraints["violations"] + constraints["warnings"]
-    ]
+    risks = [item["reason"] for item in constraints["violations"] + constraints["warnings"]]
     return {
         "proposed_mode": proposed_mode,
         "estimated_utility": round(utility, 6),

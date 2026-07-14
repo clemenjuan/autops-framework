@@ -15,66 +15,7 @@ from typing import Any
 import numpy as np
 
 from autops.missions.eventsat.transitions import total_storage_mb
-
-MODES = (
-    "charging",
-    "communication",
-    "payload_observe",
-    "payload_compress",
-    "payload_detect",
-    "payload_send",
-    "safe",
-)
-
-OBSERVATION_NAMES = (
-    "battery_soc",
-    "obc_fill",
-    "jetson_raw_fill",
-    "jetson_compressed_fill",
-    "orbital_phase_sin",
-    "orbital_phase_cos",
-    "time_to_next_eclipse_norm",
-    "time_to_next_pass_norm",
-    "remaining_pass_duration_norm",
-    "episode_progress",
-    "in_sunlight",
-    "ground_pass_active",
-    "health_nominal",
-    "uncompressed_observations_norm",
-    "compression_progress_norm",
-    "undetected_observations_norm",
-    "detection_progress_norm",
-    "downlink_utilization",
-    *(f"current_mode_{mode}" for mode in MODES),
-)
-
-STATE_NAMES = (
-    "battery_soc",
-    "current_mode_idx",
-    "in_sunlight",
-    "ground_pass_active",
-    "orbital_phase",
-    "time_to_next_eclipse",
-    "time_to_next_pass",
-    "remaining_pass_duration",
-    "following_gap_steps",
-    "data_stored_mb",
-    "obc_data_mb",
-    "jetson_raw_mb",
-    "jetson_compressed_mb",
-    "data_downlinked_mb",
-    "uncompressed_observations",
-    "compression_progress",
-    "undetected_observations",
-    "detection_progress",
-    "total_observation_s",
-    "total_detections",
-    "storage_capacity_mb",
-    "jetson_capacity_mb",
-    "remaining_achievable_downlink_mb",
-    "achievable_downlink_mb",
-    "health_nominal",
-)
+from autops.wm.schema import EVENTSAT_ACTIONS as MODES
 
 
 @dataclass

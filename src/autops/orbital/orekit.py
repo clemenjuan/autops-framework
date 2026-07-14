@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 import math
 from dataclasses import dataclass
 from datetime import datetime
@@ -13,8 +12,6 @@ from typing import Any
 
 from .fallback import data_capacity_mb
 from .models import EclipseInterval, GroundPass, GroundStation, OrbitElements
-
-logger = logging.getLogger(__name__)
 
 
 class OrekitUnavailable(RuntimeError):
@@ -130,20 +127,16 @@ def create_propagator(orbit: OrbitElements) -> OrekitPropagator:
     if orbit.propagator == "keplerian":
         return OrekitPropagator(bindings.KeplerianPropagator(keplerian), "keplerian")
 
-    try:
-        raw = bindings.EcksteinHechlerPropagator(
-            keplerian,
-            constants.WGS84_EARTH_EQUATORIAL_RADIUS,
-            constants.WGS84_EARTH_MU,
-            constants.WGS84_EARTH_C20,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-        )
-    except Exception as exc:
-        logger.warning("Eckstein-Hechler failed; using Keplerian propagation: %s", exc)
-        return OrekitPropagator(bindings.KeplerianPropagator(keplerian), "keplerian")
+    raw = bindings.EcksteinHechlerPropagator(
+        keplerian,
+        constants.WGS84_EARTH_EQUATORIAL_RADIUS,
+        constants.WGS84_EARTH_MU,
+        constants.WGS84_EARTH_C20,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+    )
     return OrekitPropagator(raw, "eckstein-hechler-j2")
 
 

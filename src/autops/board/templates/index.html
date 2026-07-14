@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{TITLE}}</title>
+  <style>
+    :root { color-scheme: light dark; font-family: ui-sans-serif, system-ui, sans-serif; }
+    body { margin: 0; padding: 2rem; background: #0b1220; color: #e5edf8; }
+    main { max-width: 100%; margin: auto; }
+    h1 { margin-bottom: .25rem; }
+    .meta { margin: 0 0 1.5rem; color: #9fb0c8; }
+    .table-wrap { overflow: auto; border: 1px solid #33445f; border-radius: .5rem; }
+    table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+    th, td { padding: .65rem .8rem; border-bottom: 1px solid #263650; white-space: nowrap; }
+    th { position: sticky; top: 0; background: #15243a; text-align: left; }
+    tr:nth-child(even) { background: #111e31; }
+    td.numeric { text-align: right; }
+    footer { margin-top: 1rem; color: #9fb0c8; font-size: .9rem; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>{{TITLE}}</h1>
+    <p class="meta">{{RUN_COUNT}} completed coordinates · generated {{GENERATED_AT}}</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>{{HEADERS}}</tr></thead>
+        <tbody>{{ROWS}}</tbody>
+      </table>
+    </div>
+    <footer>Only completed, provenance-bearing runs are shown. Sample count is always explicit.</footer>
+  </main>
+</body>
+</html>

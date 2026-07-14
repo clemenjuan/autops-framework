@@ -1,0 +1,93 @@
+dataset:
+  schema: autops.world_model.trace/v1
+  history: 3
+  prediction_steps: 1
+
+model:
+  observation_dim: 25
+  action_dim: 7
+  embed_dim: 192
+  encoder_hidden_dim: 256
+  projector_hidden_dim: 512
+  predictor_blocks: 4
+  predictor_heads: 8
+  predictor_head_dim: 48
+  predictor_mlp_dim: 512
+  dropout: 0.1
+  embedding_dropout: 0.0
+
+loss:
+  sigreg_weight: 0.09
+  sigreg_knots: 17
+  sigreg_projections: 1024
+
+training:
+  seed: 3072
+  batch_size: 64
+  optimizer_steps: 150000
+  learning_rate: 0.00005
+  weight_decay: 0.001
+  gradient_clip: 1.0
+  warmup_steps: 2000
+  validation_interval: 2000
+  train_fraction: 0.9
+  validation_sample_size: 512
+  train_loss_window: 1000
+  device: cpu
+
+probes:
+  ridge: 0.001
+  attributes:
+    [battery_margin, storage_margin, downlink_progress, science_progress,
+     detection_progress, communication_opportunity, forced_mode_risk, anomaly_safe]
+
+planner:
+  artifact_root: artifacts
+  horizon: 12
+  samples: 256
+  elites: 32
+  iterations: 4
+  alpha: 0.7
+  min_probability: 0.0001
+  reserve_soc: 0.5
+  comms_soc_floor: 0.25
+  plan_hold: 12
+  seed: 3072
+  normalize_attribute_scale: true
+  downlink_reflex: true
+  exact_analytic_shaping: false
+  lightweight_shaping: true
+  contact_guidance: true
+  contact_guidance_strength: 0.75
+  undeliverable_capacity_penalty: 0.02
+  downlink_reward: 1.0
+  pass_stage_reward: 0.15
+  downlink_shaping_reference_weight: 0.25
+  mode_weight_presets:
+    science:
+      battery_margin: 0.14
+      storage_margin: 0.10
+      downlink_progress: 0.30
+      science_progress: 0.28
+      detection_progress: 0.08
+      communication_opportunity: 0.04
+      forced_mode_risk: -0.04
+      anomaly_safe: 0.02
+    safe:
+      battery_margin: 0.42
+      storage_margin: 0.20
+      downlink_progress: 0.06
+      science_progress: 0.03
+      detection_progress: 0.02
+      communication_opportunity: 0.02
+      forced_mode_risk: -0.15
+      anomaly_safe: 0.10
+    downlink:
+      battery_margin: 0.16
+      storage_margin: 0.26
+      downlink_progress: 0.38
+      science_progress: 0.05
+      detection_progress: 0.04
+      communication_opportunity: 0.06
+      forced_mode_risk: -0.03
+      anomaly_safe: 0.02

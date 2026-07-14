@@ -76,7 +76,17 @@ class ExperimentRunner:
             "total_reward": total_reward,
             "metrics": collector.aggregate(),
             "provenance": env.episode_provenance(),
+            "decision_diagnostics": self._decision_diagnostics(paradigm),
         }
+
+    def _decision_diagnostics(self, paradigm: Any) -> dict[str, Any]:
+        diagnostics: dict[str, Any] = {}
+        for role in ("onboard", "ground"):
+            representation = getattr(paradigm, role, None)
+            collect = getattr(representation, "diagnostics", None)
+            if callable(collect):
+                diagnostics[role] = collect()
+        return diagnostics
 
     def _build_paradigm(self):
         memory = FixedMemory()

@@ -19,7 +19,7 @@ class LLMClient:
     def __init__(self, config: dict[str, Any] | None = None) -> None:
         cfg = config or {}
         self.provider = str(cfg.get("llm_provider", "auto"))
-        self.model = str(cfg.get("llm_model", "qwen3.5:4b"))
+        self.model = str(cfg.get("llm_model", "qwen3.6:35b"))
         self.temperature = float(cfg.get("llm_temperature", 0.0))
         self.mock_mode = bool(cfg.get("llm_mock", False))
         replay = cfg.get("llm_replay", ())

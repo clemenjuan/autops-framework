@@ -1,0 +1,31 @@
+# Private research material: never commit or publish.
+/research/
+/CLAUDE.local.md
+
+# Runtime artifacts.
+/artifacts/
+/boards/
+/data/
+/logs/
+/outputs/
+/results/
+/wandb/
+
+# Python and tooling caches.
+/.venv/
+/.coverage
+/.mypy_cache/
+/.pytest_cache/
+/.ruff_cache/
+/**/__pycache__/
+*.py[cod]
+*.egg-info/
+htmlcov/
+
+# Editors, operating systems, and scratch files.
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.tmp
+*~

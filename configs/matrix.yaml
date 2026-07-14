@@ -1,0 +1,80 @@
+version: 1
+
+# This file is the single machine-readable definition of framework cells.
+representations:
+  symb:
+    substrate: symbolic
+    action_space: single-shot
+    shield: false
+    implemented: true
+  rl:
+    substrate: subsymbolic-rl
+    action_space: single-shot
+    shield: false
+    implemented: false
+    reserved: true
+  hrl:
+    substrate: hybrid-rl-symbolic
+    action_space: single-shot
+    shield: true
+    implemented: false
+    reserved: true
+  llm-s:
+    substrate: llm
+    action_space: single-shot
+    shield: false
+    implemented: true
+  llm-a:
+    substrate: llm
+    action_space: agentic
+    shield: false
+    implemented: true
+  hllm-s:
+    substrate: llm-symbolic
+    action_space: single-shot
+    shield: true
+    implemented: true
+  hllm-a:
+    substrate: llm-symbolic
+    action_space: agentic
+    shield: true
+    implemented: true
+  lewm-cem:
+    substrate: latent-world-model
+    action_space: receding-horizon
+    shield: true
+    implemented: true
+
+# The canonical EventSat design remains 32 cells. rl/hrl names are reserved so
+# the later RLlib port can land without changing any coordinate.
+canonical_eventsat_32:
+  conventional:
+    ground: [symb]
+  ag:
+    ground: [symb, rl, hrl, llm-s, llm-a, hllm-s, hllm-a]
+  ao:
+    onboard: [symb, rl, hrl]
+  ah:
+    onboard: [symb, rl, hrl]
+    ground: [symb, rl, hrl, llm-s, llm-a, hllm-s, hllm-a]
+
+missions:
+  eventsat:
+    organisations: [sas]
+    paradigms:
+      conventional:
+        ground: [symb]
+      ag:
+        ground: [symb, llm-s, llm-a, hllm-s, hllm-a]
+      ao:
+        onboard: [symb, lewm-cem]
+      ah:
+        onboard: [symb, lewm-cem]
+        ground: [symb, llm-s, llm-a, hllm-s, hllm-a]
+  ssa:
+    organisations: [sas, cmas, dmas, hmas, imas]
+    constellation_sizes: [20, 100]
+    calibration_sizes: [1, 3]
+    paradigms:
+      ao:
+        onboard: [symb]

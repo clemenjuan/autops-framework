@@ -1,0 +1,169 @@
+scenario_name: eventsat
+scenario_version: "2.0"
+description: Event-camera 6U CubeSat scheduling benchmark
+
+simulation:
+  timestep_s: 60
+  max_steps: 10080
+  epoch: "2026-06-01T00:00:00Z"
+
+constellation:
+  size: 1
+
+orbit:
+  type: SSO
+  altitude_km: 400
+  inclination_deg: 97.4
+  eccentricity: 0.001
+  raan_deg: 0.0
+  arg_perigee_deg: 0.0
+  true_anomaly_deg: 0.0
+  orbital_period_s: 5554
+  eclipse_fraction: 0.36
+  propagator: j2
+  launch_lottery: true
+
+satellite:
+  form_factor: 6U
+  mass_kg: 6.789
+  mass_with_contingency_kg: 7.646
+  max_mass_kg: 7.980
+
+power:
+  solar_panels:
+    config: 2x6U + 2x3U body-mounted
+    generation_peak_w: 24.0
+    panel_efficiency_factor: 0.70
+  battery:
+    count: 2
+    capacity_wh: 70.0
+    initial_soc: 0.8
+    min_soc: 0.2
+    max_soc: 1.0
+    charge_efficiency: 0.9
+  onboard_compute_w: 7.0
+  jetson_active_modes:
+    [payload_observe, payload_compress, payload_detect, payload_send]
+  consumption:
+    charging: {sun_w: 4.72, eclipse_w: 4.32}
+    communication: {sun_w: 33.65, eclipse_w: 33.24}
+    payload_observe: {sun_w: 17.94, eclipse_w: 17.55}
+    payload_compress: {sun_w: 12.77, eclipse_w: 12.37}
+    payload_detect: {sun_w: 12.77, eclipse_w: 12.37}
+    payload_send: {sun_w: 12.77, eclipse_w: 12.37}
+    safe: {sun_w: 9.58, eclipse_w: 9.58}
+    detumbling: {sun_w: 2.66, eclipse_w: 2.33}
+
+communications:
+  sband:
+    downlink_rate_kbps: 50
+    uplink_rate_kbps: 128
+  uhf:
+    downlink_rate_kbps: 9.6
+    uplink_rate_kbps: 9.6
+  link_budget:
+    downlink:
+      sat_tx_power_dbm: 33.0
+      sat_antenna_gain_dbi: 5.0
+      sat_cable_loss_db: 2.0
+      frequency_mhz: 2245.0
+      gs_antenna_gain_dbi: 31.34
+      gs_lna_nf_db: 0.7
+      gs_cable_loss_db: 2.0
+      gs_sensitivity_dbm: -100.0
+    uplink:
+      gs_tx_power_dbm: 44.7
+      gs_pa_gain_db: 33.0
+      gs_antenna_gain_dbi: 31.34
+      gs_cable_loss_db: 2.0
+      frequency_mhz: 2067.5
+      sat_antenna_gain_dbi: 5.0
+      sat_cable_loss_db: 2.0
+      sat_sensitivity_dbm: -121.0
+    losses:
+      atmosphere_db: 2.0
+      pointing_error_db: 2.0
+  ground_station:
+    name: Ottobrunn
+    latitude_deg: 48.0483
+    longitude_deg: 11.6567
+    min_elevation_deg: 10.0
+  passes:
+    min_per_day: 2
+    max_per_day: 3
+    min_duration_s: 22
+    max_duration_s: 422
+
+storage:
+  obc_capacity_mb: 4096
+  jetson_capacity_mb: 249036.8
+  observation_size_mb: 9.41
+  compression_ratio: 5.11
+  detection_metadata_mb: 0.01
+  jetson_to_obc_rate_kbps: 8000
+
+payload:
+  event_camera:
+    resolution: [720, 1280]
+    type: Prophesee
+  frame_camera:
+    type: context_camera
+  jetson:
+    model: Orin Nano
+    power_observe_w: 11.5
+    power_compress_w: 7.0
+  observation_duration_s: 60
+  compression_time_factor: 2.0
+  detection_time_s: 300
+  calibration_duration_s: 120
+
+modes:
+  available:
+    [charging, communication, payload_observe, payload_compress, payload_detect, payload_send, safe]
+  default: charging
+  constraints:
+    communication: {requires_ground_pass: false, requires_fine_pointing: true}
+    payload_observe: {requires_eclipse: false, min_battery_soc: 0.4}
+    payload_compress: {min_battery_soc: 0.3}
+    payload_detect: {min_battery_soc: 0.3}
+    payload_send: {min_battery_soc: 0.3}
+  transition_overhead:
+    settling_time_s: 135.0
+    # The discrete simulator intentionally floors 135/60 to two nonproductive steps.
+    discretization: floor
+    attitude_maneuver_modes: [payload_observe, communication]
+
+anomalies:
+  probability_per_step: 0.001
+  kind: thermal_warning
+  min_duration_steps: 3
+  max_duration_steps: 10
+
+rewards:
+  reward_scale: 0.01
+  resource_penalty_factor: 1.0
+  battery_low_threshold: 0.3
+  storage_high_threshold: 0.8
+  standby_penalty: 0.0
+  safe_penalty: 0.3
+  observe_reward: 0.0
+  compress_reward: 0.0
+  failed_action_penalty: 0.1
+  comm_reward_factor: 1.0
+  comm_reward_cap: 5.0
+  mission_scale: 1.0
+  mission_observation_weight: 0.0
+  mission_downlink_weight: 1.0
+
+objectives:
+  total_observation_hours: 2.0
+  min_downlinked_data_mb: 221
+  mission_duration_days: 90
+  observations_per_day_target: 4
+
+metrics:
+  utility_weights:
+    observation: 0.0
+    downlink: 1.0
+    anomaly_penalty: 0.1
+  manual_command_weight: 10.0

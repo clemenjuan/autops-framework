@@ -17,14 +17,19 @@ The design follows established spacecraft-operations practice and controlled aut
 ```bash
 uv sync --extra dev
 uv run autops run eventsat/sas/ag/symb --episodes 1
-uv run autops sweep eventsat --episodes 10 --seeds 42:51
+uv run autops sweep eventsat --paradigm ag --representation symb --episodes 10 --seeds 42:51
 uv run autops export eventsat/sas/ao/symb --episodes 2 --steps 64
+uv run autops export eventsat/sas/ao/symb eventsat/sas/ag/symb --episodes 2 --steps 64
 uv run autops board
 uv run pytest
 ```
 
 Experiments expand at runtime from `configs/matrix.yaml` and the mission configuration. Per-run changes use `--episodes`, `--seeds`, `--steps`, and `--set key=value`; no per-cell configuration files are generated.
 
-Install `--extra orbital` to use Orekit's Eckstein-Hechler J2 propagation and place `orekit-data.zip` in the repository root. Without Java/Orekit, AUTOPS uses its documented seeded fallback. Install `--extra llm` for live providers or use the deterministic mock in tests. Install `--extra wm` for LeWM training and learned planning.
+Passing multiple compatible coordinates to `export` creates one mixed-policy corpus. `--episodes` and `--seeds` apply independently to every coordinate; the trace records each source coordinate, scientific configuration hash, source revision/dirty state, actual orbital backend, timestep, episode count, and seed sequence without local paths.
+
+Install `--extra orbital` to use Orekit's Eckstein-Hechler J2 propagation. The source repository and built wheel already include `orekit-data.zip`; source checkouts keep it at the repository root. Without Java/Orekit, AUTOPS uses its documented seeded fallback. Install `--extra llm` for live providers or use the deterministic mock in tests. Install `--extra wm` for LeWM training and learned planning.
+
+The learned-planning workflow ends with `uv run autops train evaluate TRACE --artifact PLANNER.json --output EVAL.json`. Evaluation uses the same categorical CEM and latent candidate scorer as closed-loop control, restricted to deterministic contexts from checkpoint-held-out episodes.
 
 See [framework.md](docs/framework.md) for the complete matrix and metric contract, and [architecture.md](docs/architecture.md) for package boundaries and extension seams.

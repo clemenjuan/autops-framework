@@ -125,20 +125,7 @@ def train_world_model(
     recipe = load_eventsat_recipe()
     config = replace(recipe.training, max_steps=max_steps, batch_size=batch_size, device=device)
     digest = trace_sha256(trace)
-    tracking_config = {
-        "schema_version": "autops.wandb-training/v1",
-        "trace": {
-            "schema_version": trace.metadata.schema_version,
-            "sha256": digest,
-            "mission": trace.metadata.mission,
-            "episodes": trace.n_episodes,
-            "steps_per_episode": trace.n_steps,
-            "sources": [source.to_dict() for source in trace.metadata.sources],
-        },
-        "model": asdict(recipe.model),
-        "training": asdict(config),
-    }
-    tracking_config["provenance"] = collect_provenance(tracking_config, asset_root())
+    tracking_config = _training_tracking_config(trace, recipe.model, config)
     tracker = WandbTrainingRun.start(
         project=wandb_project,
         entity=wandb_entity,
@@ -188,6 +175,26 @@ def train_world_model(
         },
     }
     return summary
+
+
+def _training_tracking_config(
+    trace: Any, model_config: Any, training_config: Any
+) -> dict[str, Any]:
+    payload = {
+        "schema_version": "autops.wandb-training/v1",
+        "trace": {
+            "schema_version": trace.metadata.schema_version,
+            "trace_sha256": trace_sha256(trace),
+            "mission": trace.metadata.mission,
+            "episodes": trace.n_episodes,
+            "steps_per_episode": trace.n_steps,
+            "sources": [source.to_dict() for source in trace.metadata.sources],
+        },
+        "model": asdict(model_config),
+        "training": asdict(training_config),
+    }
+    payload["provenance"] = collect_provenance(payload, asset_root())
+    return payload
 
 
 def _latent_features(model: Any, observations: np.ndarray, device: str) -> np.ndarray:

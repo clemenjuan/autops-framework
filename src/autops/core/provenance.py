@@ -49,6 +49,7 @@ def collect_provenance(config: dict[str, Any], root: Path) -> dict[str, Any]:
                 "pydantic",
                 "pyyaml",
                 "torch",
+                "wandb",
                 "orekit-jpype",
                 "openai",
                 "requests",

@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 import re
 from collections import deque
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -32,6 +32,7 @@ from autops.wm.schema import (
 )
 
 CHECKPOINT_SCHEMA_VERSION = "autops.lewm.checkpoint/v2"
+ValidationCallback = Callable[[int, Mapping[str, float]], None]
 
 
 @dataclass(frozen=True)
@@ -304,6 +305,7 @@ def _optimize(
     torch: Any,
     device: Any,
     rng: np.random.Generator,
+    on_validation: ValidationCallback | None,
 ) -> _TrainingEvidence:
     optimizer = torch.optim.AdamW(
         model.parameters(), lr=training.learning_rate, weight_decay=training.weight_decay
@@ -313,6 +315,8 @@ def _optimize(
     )
     model.train()
     recent_losses: deque[float] = deque(maxlen=training.train_loss_window)
+    recent_prediction_losses: deque[float] = deque(maxlen=training.train_loss_window)
+    recent_sigreg_losses: deque[float] = deque(maxlen=training.train_loss_window)
     history: list[tuple[int, float]] = []
     best_step, best_loss, best_state = 0, float("inf"), None
 
@@ -327,6 +331,18 @@ def _optimize(
             best_state = {
                 name: value.detach().cpu().clone() for name, value in model.state_dict().items()
             }
+        if on_validation is not None:
+            metrics = {
+                "train/loss": float(np.mean(recent_losses)),
+                "validation/loss": loss,
+                "validation/best_loss": best_loss,
+                "optimizer/learning_rate": float(optimizer.param_groups[0]["lr"]),
+            }
+            if recent_prediction_losses:
+                metrics["train/prediction_loss"] = float(np.mean(recent_prediction_losses))
+            if recent_sigreg_losses:
+                metrics["train/sigreg_loss"] = float(np.mean(recent_sigreg_losses))
+            on_validation(step, metrics)
 
     for step in range(1, training.max_steps + 1):
         indices = rng.integers(0, len(windows.train), size=training.batch_size)
@@ -338,6 +354,10 @@ def _optimize(
         optimizer.step()
         scheduler.step()
         recent_losses.append(float(output["loss"].detach()))
+        if "prediction_loss" in output:
+            recent_prediction_losses.append(float(output["prediction_loss"].detach()))
+        if "sigreg_loss" in output:
+            recent_sigreg_losses.append(float(output["sigreg_loss"].detach()))
         if step % training.validation_interval == 0:
             record_validation(step)
             model.train()
@@ -361,6 +381,7 @@ def train_lewm(
     *,
     model_config: LeWMConfig | None = None,
     training_config: TrainingConfig | None = None,
+    on_validation: ValidationCallback | None = None,
 ) -> TrainingResult:
     """Train the canonical LeWM recipe; small max_steps values provide CPU smoke runs."""
 
@@ -387,7 +408,7 @@ def train_lewm(
     rng = np.random.default_rng(training.seed)
     device = torch.device(training.device)
     model = build_vector_jepa(model_cfg).to(device)
-    evidence = _optimize(model, windows, training, torch, device, rng)
+    evidence = _optimize(model, windows, training, torch, device, rng, on_validation)
     contract = CheckpointContract(
         model_config=model_cfg,
         training_config=training,

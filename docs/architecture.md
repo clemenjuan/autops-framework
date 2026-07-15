@@ -145,6 +145,10 @@ result ID, commit, configuration, and checkpoint hashes. Diagnostic entries rema
 preserved but excluded. Board generation fails closed on an empty approval list or on
 incomplete, non-finite, duplicate, mismatched, or provenance-free results.
 
+`train wm` also requires a W&B run. Tracking records optimizer/validation metrics,
+the public-safe model, data, and source contracts, and content-addressed dataset and
+checkpoint artifacts. Authentication stays outside the repository.
+
 Runtime outputs are relative to the invoking working directory, or to `AUTOPS_ROOT`
 when it is set. Immutable packaged assets are resolved independently of runtime output.
 Tracked source and public documentation contain no service endpoint or credential.

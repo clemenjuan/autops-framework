@@ -144,9 +144,17 @@ def test_tiny_cpu_training_and_checkpoint_round_trip(tmp_path) -> None:
         seed=13,
     )
 
-    result = train_lewm(trace, model_config=model_config, training_config=training_config)
+    updates: list[tuple[int, dict[str, float]]] = []
+    result = train_lewm(
+        trace,
+        model_config=model_config,
+        training_config=training_config,
+        on_validation=lambda step, metrics: updates.append((step, dict(metrics))),
+    )
     assert np.isfinite(result.train_loss)
     assert np.isfinite(result.validation_loss)
+    assert [step for step, _ in updates] == [1, 2]
+    assert all("validation/loss" in metrics for _, metrics in updates)
     assert set(result.windows.episodes.train).isdisjoint(result.windows.episodes.validation)
 
     checkpoint = save_checkpoint(tmp_path / "tiny.ckpt", result)

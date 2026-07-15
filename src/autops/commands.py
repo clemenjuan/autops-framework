@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
@@ -84,6 +85,12 @@ def parser() -> argparse.ArgumentParser:
     wm.add_argument("--max-steps", type=int, default=150_000)
     wm.add_argument("--batch-size", type=int, default=64)
     wm.add_argument("--device", default="cpu")
+    wm.add_argument(
+        "--wandb-project",
+        default=os.environ.get("WANDB_PROJECT", "space-world-models"),
+    )
+    wm.add_argument("--wandb-entity", default=os.environ.get("WANDB_ENTITY"))
+    wm.add_argument("--wandb-name", default=os.environ.get("WANDB_NAME"))
     probes = training.add_parser("probes", help="fit probes and write a planner artifact")
     probes.add_argument("trace", type=Path)
     probes.add_argument("--checkpoint", type=Path, required=True)
@@ -181,6 +188,9 @@ def _train(args: argparse.Namespace) -> dict[str, Any]:
             max_steps=args.max_steps,
             batch_size=args.batch_size,
             device=args.device,
+            wandb_project=args.wandb_project,
+            wandb_entity=args.wandb_entity,
+            wandb_name=args.wandb_name,
         )
     if args.training_command == "probes":
         return fit_planner_artifact(

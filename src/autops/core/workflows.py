@@ -11,6 +11,7 @@ from typing import Any
 import numpy as np
 
 from autops.config import asset_root, expand_coordinate, load_yaml
+from autops.core.provenance import collect_provenance
 from autops.core.runner import ExperimentRunner
 from autops.wm.artifact import (
     ModelContract,
@@ -24,7 +25,8 @@ from autops.wm.artifact import (
 from autops.wm.evaluation import evaluate_lewm_cem
 from autops.wm.probes import DEFAULT_ATTRIBUTES, ProbeFit, build_eventsat_targets, fit_ridge_probe
 from autops.wm.recipe import load_eventsat_recipe
-from autops.wm.schema import EVENTSAT_OBSERVATIONS, load_trace
+from autops.wm.schema import EVENTSAT_OBSERVATIONS, load_trace, trace_sha256
+from autops.wm.tracking import WandbTrainingRun
 from autops.wm.training import (
     load_checkpoint,
     save_checkpoint,
@@ -115,13 +117,57 @@ def train_world_model(
     max_steps: int = 150_000,
     batch_size: int = 64,
     device: str = "cpu",
+    wandb_project: str = "space-world-models",
+    wandb_entity: str | None = None,
+    wandb_name: str | None = None,
 ) -> dict[str, Any]:
     trace = load_trace(trace_path)
     recipe = load_eventsat_recipe()
     config = replace(recipe.training, max_steps=max_steps, batch_size=batch_size, device=device)
-    result = train_lewm(trace, model_config=recipe.model, training_config=config)
-    checkpoint = save_checkpoint(output, result)
-    return {
+    digest = trace_sha256(trace)
+    tracking_config = {
+        "schema_version": "autops.wandb-training/v1",
+        "trace": {
+            "schema_version": trace.metadata.schema_version,
+            "sha256": digest,
+            "mission": trace.metadata.mission,
+            "episodes": trace.n_episodes,
+            "steps_per_episode": trace.n_steps,
+            "sources": [source.to_dict() for source in trace.metadata.sources],
+        },
+        "model": asdict(recipe.model),
+        "training": asdict(config),
+    }
+    tracking_config["provenance"] = collect_provenance(tracking_config, asset_root())
+    tracker = WandbTrainingRun.start(
+        project=wandb_project,
+        entity=wandb_entity,
+        name=wandb_name or f"autops-{trace.metadata.mission}-lewm-{digest[:8]}-{device}",
+        config=tracking_config,
+        trace_path=trace_path,
+        trace_metadata=tracking_config["trace"],
+    )
+    try:
+        result = train_lewm(
+            trace,
+            model_config=recipe.model,
+            training_config=config,
+            on_validation=tracker.log_validation,
+        )
+        checkpoint = save_checkpoint(output, result)
+        checkpoint_metadata = {
+            "trace_sha256": digest,
+            "best_validation_step": result.best_validation_step,
+            "best_validation_loss": result.best_validation_loss,
+            "training_steps": config.max_steps,
+        }
+        tracker.log_checkpoint(checkpoint, checkpoint_metadata)
+    except BaseException:
+        tracker.finish(exit_code=1)
+        raise
+    run_id, run_url = tracker.run_id, tracker.url
+    tracker.finish(exit_code=0)
+    summary = {
         "checkpoint": str(checkpoint),
         "train_loss": result.train_loss,
         "validation_loss": result.validation_loss,
@@ -135,7 +181,13 @@ def train_world_model(
         "validation_episodes": list(result.checkpoint_contract.episodes.validation),
         "model": asdict(result.model_config),
         "training": asdict(result.training_config),
+        "wandb": {
+            "project": wandb_project,
+            "run_id": run_id,
+            "url": run_url,
+        },
     }
+    return summary
 
 
 def _latent_features(model: Any, observations: np.ndarray, device: str) -> np.ndarray:

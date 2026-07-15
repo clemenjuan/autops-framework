@@ -30,6 +30,12 @@ Passing multiple compatible coordinates to `export` creates one mixed-policy cor
 
 Install `--extra orbital` to use Orekit's Eckstein-Hechler J2 propagation. The source repository and built wheel already include `orekit-data.zip`; source checkouts keep it at the repository root. Without Java/Orekit, AUTOPS uses its documented seeded fallback. Install `--extra llm` for live providers or use the deterministic mock in tests. Install `--extra wm` for LeWM training and learned planning.
 
+World-model training requires W&B tracking. `autops train wm` defaults to the
+`space-world-models` project, honors `WANDB_PROJECT`, `WANDB_ENTITY`, and
+`WANDB_NAME`, and fails if a run cannot be initialized. W&B receives validation
+metrics, public-safe configuration and source hashes, the trace artifact, and the
+best-validation checkpoint; credentials remain environment- or netrc-managed.
+
 The learned-planning workflow ends with `uv run autops train evaluate TRACE --artifact PLANNER.json --output EVAL.json`. Evaluation uses the same categorical CEM and latent candidate scorer as closed-loop control, restricted to deterministic contexts from checkpoint-held-out episodes.
 
 See [framework.md](docs/framework.md) for the complete matrix and metric contract, and [architecture.md](docs/architecture.md) for package boundaries and extension seams.

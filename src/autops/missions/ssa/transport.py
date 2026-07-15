@@ -25,6 +25,15 @@ def contact_seconds(env: SSAEnvironment, satellite_id: str, start_s: float) -> f
 
 
 def published_isl_pairs(env: SSAEnvironment) -> list[list[str]]:
+    if bool(env.config["constellation"].get("share_plane", False)):
+        capacities = env._episode_isl_capacities()
+        return [
+            [left, right]
+            for index, left in enumerate(env.satellite_ids)
+            for right in env.satellite_ids[index + 1 :]
+            if capacities[(min(left, right), max(left, right))] > 0.0
+        ]
+
     start_s = env.current_step * env.timestep_s
     end_s = start_s + env.timestep_s
     resolution = float(env.config["isl"]["substep_resolution_s"])
@@ -85,6 +94,11 @@ def apply_isl(
     sharers = [satellite_id for satellite_id, mode in modes.items() if mode == "isl_share"]
     if not sharers:
         return
+    capacities = (
+        env._episode_isl_capacities()
+        if bool(env.config["constellation"].get("share_plane", False))
+        else None
+    )
     end_s = epoch_s + env.timestep_s
     resolution = float(env.config["isl"]["substep_resolution_s"])
     cache: dict[tuple[str, float], tuple[float, float, float]] = {}
@@ -96,16 +110,19 @@ def apply_isl(
             env.stats.isl_attempts += 1
             if modes[destination] not in {"charging", "safe", "isl_share"}:
                 continue
-            capacity = link_capacity_bytes(
-                env.satellite_position,
-                source,
-                destination,
-                epoch_s,
-                end_s,
-                env.link_budget,
-                resolution_s=resolution,
-                cache=cache,
-            )
+            if capacities is not None:
+                capacity = capacities[(min(source, destination), max(source, destination))]
+            else:
+                capacity = link_capacity_bytes(
+                    env.satellite_position,
+                    source,
+                    destination,
+                    epoch_s,
+                    end_s,
+                    env.link_budget,
+                    resolution_s=resolution,
+                    cache=cache,
+                )
             if capacity <= 0.0:
                 continue
             env.stats.isl_successes += 1

@@ -16,6 +16,7 @@ from autops.missions.ssa.dynamics import (
 from autops.missions.ssa.geometry import (
     LinkBudget,
     build_constellation_orbits,
+    link_capacity_bytes,
     position_and_velocity_hat,
     satellite_sunlit,
     tangent_for_static,
@@ -55,6 +56,7 @@ class SSAEnvironment:
         self.record_size_bytes = float(self.config["ssa"]["record_size_kb"]) * 1024.0
         self.link_budget = LinkBudget.from_mapping(self.config["isl"])
         self._position_provider: Callable[[str, float], tuple[float, float, float]] | None = None
+        self._isl_capacity_cache: dict[tuple[str, str], float] | None = None
         self.current_step = 0
         self.seed = 0
         self.targets: list[Target] = []
@@ -266,6 +268,32 @@ class SSAEnvironment:
             return tuple(float(value) for value in fixed[satellite_id])
         return propagate_target(self._satellite_orbits[satellite_id], epoch_s)
 
+    def _episode_isl_capacities(self) -> dict[tuple[str, str], float]:
+        """Memoize shared-plane ISL capacity by undirected satellite pair."""
+        if self._isl_capacity_cache is not None:
+            return self._isl_capacity_cache
+
+        start_s = self.current_step * self.timestep_s
+        end_s = start_s + self.timestep_s
+        resolution = float(self.config["isl"]["substep_resolution_s"])
+        position_cache: dict[tuple[str, float], tuple[float, float, float]] = {}
+        capacities: dict[tuple[str, str], float] = {}
+        for index, left in enumerate(self.satellite_ids):
+            for right in self.satellite_ids[index + 1 :]:
+                key = (min(left, right), max(left, right))
+                capacities[key] = link_capacity_bytes(
+                    self.satellite_position,
+                    left,
+                    right,
+                    start_s,
+                    end_s,
+                    self.link_budget,
+                    resolution_s=resolution,
+                    cache=position_cache,
+                )
+        self._isl_capacity_cache = capacities
+        return capacities
+
     def _freshest_ground_steps(self) -> dict[str, int]:
         return {
             object_id: max(record_step(record) for record in records)
@@ -284,6 +312,7 @@ class SSAEnvironment:
         return sum(latencies) / len(latencies) if latencies else 0.0
 
     def _build_episode_geometry(self) -> None:
+        self._isl_capacity_cache = None
         constellation = self.config["constellation"]
         orbit = self.config["orbit"]
         self._satellite_orbits = build_constellation_orbits(

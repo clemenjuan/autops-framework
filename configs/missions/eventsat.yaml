@@ -42,6 +42,12 @@ power:
     max_soc: 1.0
     charge_efficiency: 0.9
   onboard_compute_w: 7.0
+  planner_compute:
+    # Assumed event-level model; replace evidence_source only with measured hardware data.
+    boot_energy_wh: 0.0
+    idle_power_w: 0.0
+    idle_time_s: 0.0
+    evidence_source: assumed
   jetson_active_modes:
     [payload_observe, payload_compress, payload_detect, payload_send]
   consumption:

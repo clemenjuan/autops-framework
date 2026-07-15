@@ -3,7 +3,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from autops.config import expand_coordinate
+from autops.core.provenance import result_document_sha256
 from autops.core.runner import ExperimentRunner
 
 
@@ -34,8 +37,8 @@ def test_override_variants_write_distinct_coordinate_hash_directories(
     assert first_hash != second_hash
 
     coordinate_root = tmp_path / "results" / "eventsat" / "sas" / "ao" / "symb"
-    first_path = coordinate_root / first_hash[:12] / "results.json"
-    second_path = coordinate_root / second_hash[:12] / "results.json"
+    first_path = coordinate_root / first_hash[:12] / f"{first['result_id']}.json"
+    second_path = coordinate_root / second_hash[:12] / f"{second['result_id']}.json"
     assert first_path.is_file()
     assert second_path.is_file()
     assert (
@@ -57,10 +60,12 @@ def test_installed_style_result_write_targets_cwd_not_package(monkeypatch, tmp_p
     monkeypatch.delenv("AUTOPS_ROOT", raising=False)
     monkeypatch.chdir(work)
 
-    destination = ExperimentRunner(spec)._write_result({"provenance": {"config_sha256": "a" * 64}})
+    payload = {"provenance": {"config_sha256": "a" * 64}}
+    destination = ExperimentRunner(spec)._write_result(payload)
+    result_id = result_document_sha256(payload)
 
     assert destination == (
-        work / "results" / "eventsat" / "sas" / "ao" / "symb" / ("a" * 12) / "results.json"
+        work / "results" / "eventsat" / "sas" / "ao" / "symb" / ("a" * 12) / f"{result_id}.json"
     )
     assert destination.is_file()
     assert not (package_root / "results").exists()
@@ -72,3 +77,18 @@ def test_installed_style_result_write_targets_cwd_not_package(monkeypatch, tmp_p
     )
     assert explicit_destination.is_relative_to(explicit)
     assert explicit_destination.is_file()
+
+
+def test_result_ids_are_idempotent_and_never_overwritten(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    spec = expand_coordinate("eventsat/sas/ao/symb", episodes=1, steps=1, seeds=[7])
+    payload = {"provenance": {"config_sha256": "c" * 64}, "value": 1}
+    runner = ExperimentRunner(spec)
+
+    first = runner._write_result(payload)
+    second = runner._write_result(payload)
+
+    assert first == second
+    changed = {**payload, "result_id": result_document_sha256(payload), "value": 2}
+    with pytest.raises(ValueError, match="result_id"):
+        runner._write_result(changed)

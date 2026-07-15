@@ -1,0 +1,7 @@
+schema_version: autops.paper-results-manifest/v1
+paper_id: paper-a-compute-aware-planning
+
+# Populate only after the July 18 gate passes. Diagnostic runs remain immutable
+# and may be listed separately without entering paper figures or tables.
+approved_results: []
+diagnostic_results: []

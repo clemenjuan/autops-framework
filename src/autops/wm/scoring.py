@@ -9,7 +9,87 @@ import numpy as np
 
 from autops.wm.artifact import PlannerArtifact
 from autops.wm.cem import one_hot_sequences
-from autops.wm.probes import scale_attribute_weights
+from autops.wm.guidance import CandidateProjection
+from autops.wm.probes import (
+    DEFAULT_ATTRIBUTES,
+    eventsat_attribute_values,
+    scale_attribute_weights,
+)
+
+
+def analytical_candidate_attributes(
+    projection: CandidateProjection,
+    attribute_names: tuple[str, ...],
+) -> np.ndarray:
+    """Decode one projected bank with the canonical analytical target definitions."""
+
+    unknown = set(attribute_names) - set(DEFAULT_ATTRIBUTES)
+    if unknown:
+        raise ValueError(f"analytical oracle received unknown attributes: {sorted(unknown)}")
+    states = projection.terminal_states
+
+    def column(name: str, default: float = 0.0) -> np.ndarray:
+        return np.asarray([float(state.get(name, default)) for state in states])
+
+    stored = column("obc_data_mb") + column("jetson_raw_mb") + column("jetson_compressed_mb")
+    all_attributes = eventsat_attribute_values(
+        battery_soc=column("battery_soc", 0.5),
+        stored_mb=stored,
+        storage_capacity_mb=column("storage_capacity_mb", 4096.0),
+        data_downlinked_mb=column("data_downlinked_mb"),
+        total_observation_s=column("total_observation_s"),
+        total_detections=column("total_detections"),
+        communication_opportunity=column("contact_window_seconds") > 0.0,
+        forced_mode_risk=projection.repair_counts > 0,
+        health_nominal=np.asarray(
+            [state.get("health_status", "nominal") == "nominal" for state in states]
+        ),
+    )
+    indices = [DEFAULT_ATTRIBUTES.index(name) for name in attribute_names]
+    return all_attributes[:, indices]
+
+
+def candidate_selection_metrics(
+    scorer_scores: Mapping[str, np.ndarray],
+    analytical_scores: np.ndarray,
+    *,
+    elites: int,
+) -> dict[str, dict[str, float]]:
+    """Compare scorer choices on one shared bank against an analytical oracle."""
+
+    oracle = np.asarray(analytical_scores, dtype=np.float64)
+    if oracle.ndim != 2 or not np.isfinite(oracle).all():
+        raise ValueError("analytical_scores must be finite [contexts, candidates]")
+    if isinstance(elites, bool) or not isinstance(elites, int) or not 0 < elites <= oracle.shape[1]:
+        raise ValueError("elites must be a positive integer no larger than the candidate bank")
+    oracle_order = np.argsort(oracle, axis=1, kind="stable")[:, -elites:]
+    oracle_best = oracle.max(axis=1)
+    evidence: dict[str, dict[str, float]] = {}
+    for name, supplied in scorer_scores.items():
+        values = np.asarray(supplied, dtype=np.float64)
+        if values.shape != oracle.shape or not np.isfinite(values).all():
+            raise ValueError(f"{name} scores must match the finite analytical score bank")
+        selected = np.argmax(values, axis=1)
+        selected_oracle = oracle[np.arange(oracle.shape[0]), selected]
+        regret = oracle_best - selected_oracle
+        scorer_order = np.argsort(values, axis=1, kind="stable")[:, -elites:]
+        overlap = np.asarray(
+            [
+                len(set(oracle_row) & set(scorer_row)) / elites
+                for oracle_row, scorer_row in zip(oracle_order, scorer_order, strict=True)
+            ],
+            dtype=np.float64,
+        )
+        evidence[str(name)] = {
+            "top_elite_overlap": float(overlap.mean()),
+            "analytical_regret_mean": float(regret.mean()),
+            "analytical_regret_std": float(regret.std()),
+            "analytical_regret_max": float(regret.max()),
+            "analytical_best_selection_rate": float(np.mean(regret <= 1e-12)),
+        }
+    if not evidence:
+        raise ValueError("at least one candidate scorer is required")
+    return evidence
 
 
 def scalarization_weights(
@@ -144,6 +224,8 @@ def latent_candidate_attributes(
 
 
 __all__ = [
+    "analytical_candidate_attributes",
+    "candidate_selection_metrics",
     "latent_candidate_attributes",
     "scalarization_weights",
     "validate_planner_checkpoint",

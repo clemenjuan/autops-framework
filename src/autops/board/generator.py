@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from autops.board.evidence import validate_result_document
+from autops.board.manifest import verified_result_paths
 from autops.board.model import LeWMEvidence
 
 
@@ -83,18 +84,29 @@ def load_completed_run(path: str | Path) -> BoardRun:
     )
 
 
-def discover_runs(results_root: str | Path) -> list[BoardRun]:
-    """Load every canonical ``results.json`` beneath a runtime result root."""
-
-    root = Path(results_root)
-    paths = [root] if root.is_file() else sorted(root.rglob("results.json"))
+def _runs_from_paths(paths: list[Path]) -> list[BoardRun]:
     runs = [load_completed_run(path) for path in paths]
     if not runs:
-        raise ValueError(f"no completed results found under {root}")
+        raise ValueError("no completed results were selected")
     identities = [(run.coordinate, run.config_sha256) for run in runs]
     if len(set(identities)) != len(identities):
         raise ValueError("board input contains a duplicate experiment configuration")
     return sorted(runs, key=lambda run: run.coordinate)
+
+
+def discover_runs(results_root: str | Path) -> list[BoardRun]:
+    """Load completed results for non-paper exploratory boards."""
+
+    root = Path(results_root)
+    paths = [root] if root.is_file() else sorted(root.rglob("*.json"))
+    return _runs_from_paths(paths)
+
+
+def discover_manifest_runs(manifest_path: str | Path, runtime_root: str | Path) -> list[BoardRun]:
+    """Load only approved, identity-verified paper results."""
+
+    paths = verified_result_paths(manifest_path, runtime_root)
+    return _runs_from_paths(paths)
 
 
 def _cell(value: str, *, numeric: bool = False, title: str | None = None) -> str:
@@ -134,15 +146,12 @@ def _render_table(runs: list[BoardRun]) -> tuple[str, str]:
     return header_html, "\n".join(rows)
 
 
-def build_board(
-    results_root: str | Path,
+def _write_board(
+    runs: list[BoardRun],
     output: str | Path,
     *,
     title: str = "AUTOPS results",
 ) -> Path:
-    """Render an auditable static board; empty and incomplete inputs fail closed."""
-
-    runs = discover_runs(results_root)
     headers, rows = _render_table(runs)
     template = (
         Path(__file__).with_name("templates").joinpath("index.html").read_text(encoding="utf-8")
@@ -162,4 +171,38 @@ def build_board(
     return destination
 
 
-__all__ = ["BoardRun", "build_board", "discover_runs", "load_completed_run"]
+def build_board(
+    results_root: str | Path,
+    output: str | Path,
+    *,
+    title: str = "AUTOPS results",
+) -> Path:
+    """Render a non-paper exploratory board from completed result files."""
+
+    return _write_board(discover_runs(results_root), output, title=title)
+
+
+def build_manifest_board(
+    manifest_path: str | Path,
+    runtime_root: str | Path,
+    output: str | Path,
+    *,
+    title: str = "AUTOPS results",
+) -> Path:
+    """Render a paper board only from approved manifest identities."""
+
+    return _write_board(
+        discover_manifest_runs(manifest_path, runtime_root),
+        output,
+        title=title,
+    )
+
+
+__all__ = [
+    "BoardRun",
+    "build_board",
+    "build_manifest_board",
+    "discover_manifest_runs",
+    "discover_runs",
+    "load_completed_run",
+]

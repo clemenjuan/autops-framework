@@ -18,6 +18,20 @@ def scientific_config_sha256(config: dict[str, Any]) -> str:
     return hashlib.sha256(json.dumps(scientific, sort_keys=True, default=str).encode()).hexdigest()
 
 
+def result_document_sha256(result: dict[str, Any]) -> str:
+    """Hash immutable result content without recursively hashing its identifier."""
+
+    payload = {key: value for key, value in result.items() if key != "result_id"}
+    encoded = json.dumps(
+        payload,
+        allow_nan=False,
+        separators=(",", ":"),
+        sort_keys=True,
+        default=str,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
 def collect_provenance(config: dict[str, Any], root: Path) -> dict[str, Any]:
     commit = _git(root, "rev-parse", "HEAD")
     source_revision = commit or _package_revision()
@@ -73,4 +87,4 @@ def _version(name: str) -> str | None:
         return None
 
 
-__all__ = ["collect_provenance", "scientific_config_sha256"]
+__all__ = ["collect_provenance", "result_document_sha256", "scientific_config_sha256"]

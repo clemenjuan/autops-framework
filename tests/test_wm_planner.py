@@ -212,6 +212,7 @@ def test_mission_mask_applies_to_planning_and_repairs_held_actions() -> None:
     assert _mode(held) == "charging"
     assert held["eventsat_0"]["jetson_planned"] is False
     assert "repaired" in str(planner.last_rationale)
+    assert planner.diagnostics()["future_action_repair_rate"] == pytest.approx(1.0)
 
     anomaly_mask = planner.mission_action_mask(_state(health_status="payload_fault"))
     assert set(np.flatnonzero(anomaly_mask)) == {0, 6}
@@ -299,6 +300,8 @@ def test_compute_diagnostics_are_timed_resettable_and_identity_bound(monkeypatch
     diagnostics = planner.diagnostics()
     assert diagnostics["planning_events"] == 2
     assert diagnostics["held_action_steps"] == 1
+    assert diagnostics["held_action_repairs"] == 0
+    assert diagnostics["future_action_repair_rate"] == 0.0
     assert diagnostics["reflex_overrides"] == 1
     assert diagnostics["cem_latency_total_s"] == pytest.approx(1.0)
     assert diagnostics["cem_latency_mean_s"] == pytest.approx(0.5)
@@ -333,6 +336,8 @@ def test_compute_diagnostics_are_timed_resettable_and_identity_bound(monkeypatch
     reset = planner.diagnostics()
     assert reset["planning_events"] == 0
     assert reset["held_action_steps"] == 0
+    assert reset["held_action_repairs"] == 0
+    assert reset["future_action_repair_rate"] == 0.0
     assert reset["reflex_overrides"] == 0
     assert reset["cem_latency_total_s"] == 0.0
     assert reset["evaluated_rollouts"] == 0

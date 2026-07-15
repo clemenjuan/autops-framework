@@ -20,7 +20,7 @@ uv run autops run eventsat/sas/ag/symb --episodes 1
 uv run autops sweep eventsat --paradigm ag --representation symb --episodes 10 --seeds 42:51
 uv run autops export eventsat/sas/ao/symb --episodes 2 --steps 64
 uv run autops export eventsat/sas/ao/symb eventsat/sas/ag/symb --episodes 2 --steps 64
-uv run autops board
+uv run autops board --manifest configs/papers/paper_a.yaml
 uv run pytest
 ```
 

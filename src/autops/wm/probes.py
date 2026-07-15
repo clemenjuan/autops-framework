@@ -25,6 +25,34 @@ DEFAULT_ATTRIBUTES = (
 )
 
 
+def eventsat_attribute_values(
+    *,
+    battery_soc: np.ndarray,
+    stored_mb: np.ndarray,
+    storage_capacity_mb: np.ndarray,
+    data_downlinked_mb: np.ndarray,
+    total_observation_s: np.ndarray,
+    total_detections: np.ndarray,
+    communication_opportunity: np.ndarray,
+    forced_mode_risk: np.ndarray,
+    health_nominal: np.ndarray,
+) -> np.ndarray:
+    """Compute the canonical eight EventSat attributes for any matching axes."""
+
+    capacity = np.maximum(np.asarray(storage_capacity_mb), 1.0)
+    values = (
+        np.clip((np.asarray(battery_soc) - 0.20) / 0.80, 0.0, 1.0),
+        np.clip(1.0 - np.asarray(stored_mb) / capacity, 0.0, 1.0),
+        np.asarray(data_downlinked_mb),
+        np.asarray(total_observation_s) / 3600.0,
+        np.asarray(total_detections),
+        np.asarray(communication_opportunity),
+        np.asarray(forced_mode_risk),
+        np.asarray(health_nominal),
+    )
+    return np.stack(values, axis=-1).astype(np.float32)
+
+
 @dataclass(frozen=True)
 class ProbeFit:
     """Raw-unit affine readout plus normalization and validation evidence."""
@@ -68,21 +96,21 @@ def build_eventsat_targets(trace: TraceDataset) -> np.ndarray:
     if missing:
         raise ValueError(f"EventSat state is missing probe fields: {sorted(missing)}")
     state = trace.state
-    capacity = np.maximum(state[..., index["storage_capacity_mb"]], 1.0)
+    capacity = state[..., index["storage_capacity_mb"]]
     stored = sum(
         state[..., index[name]] for name in ("obc_data_mb", "jetson_raw_mb", "jetson_compressed_mb")
     )
-    values = (
-        np.clip((state[..., index["battery_soc"]] - 0.20) / 0.80, 0.0, 1.0),
-        np.clip(1.0 - stored / capacity, 0.0, 1.0),
-        state[..., index["data_downlinked_mb"]],
-        state[..., index["total_observation_s"]] / 3600.0,
-        state[..., index["total_detections"]],
-        (state[..., index["ground_pass_active"]] > 0.5).astype(np.float32),
-        trace.forced_mode,
-        state[..., index["health_nominal"]],
+    return eventsat_attribute_values(
+        battery_soc=state[..., index["battery_soc"]],
+        stored_mb=stored,
+        storage_capacity_mb=capacity,
+        data_downlinked_mb=state[..., index["data_downlinked_mb"]],
+        total_observation_s=state[..., index["total_observation_s"]],
+        total_detections=state[..., index["total_detections"]],
+        communication_opportunity=state[..., index["ground_pass_active"]] > 0.5,
+        forced_mode_risk=trace.forced_mode,
+        health_nominal=state[..., index["health_nominal"]],
     )
-    return np.stack(values, axis=-1).astype(np.float32)
 
 
 def _validate_probe_inputs(
@@ -196,6 +224,7 @@ __all__ = [
     "TARGET_DEFINITION_VERSION",
     "ProbeFit",
     "build_eventsat_targets",
+    "eventsat_attribute_values",
     "fit_ridge_probe",
     "scale_attribute_weights",
 ]

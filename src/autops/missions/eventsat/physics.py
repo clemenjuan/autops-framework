@@ -151,13 +151,11 @@ def power_step(
     mode: str,
     in_sunlight: bool,
     *,
-    planner_power_w: float = 0.0,
+    planner_energy_wh: float = 0.0,
 ) -> dict[str, float]:
     power = config["power"]
     phase = "sun_w" if in_sunlight else "eclipse_w"
     load_w = float(power["consumption"][mode][phase])
-    if mode not in set(power.get("jetson_active_modes", [])):
-        load_w += max(0.0, planner_power_w)
     solar = power["solar_panels"]
     generation_w = (
         float(solar["generation_peak_w"]) * float(solar["panel_efficiency_factor"])
@@ -165,7 +163,8 @@ def power_step(
         else 0.0
     )
     hours = float(config["simulation"]["timestep_s"]) / 3600.0
-    gross_wh = load_w * hours
+    planner_wh = max(0.0, float(planner_energy_wh))
+    gross_wh = load_w * hours + planner_wh
     solar_wh = generation_w * hours
     energy_delta = solar_wh - gross_wh
     if energy_delta > 0:
@@ -173,11 +172,6 @@ def power_step(
     capacity = float(power["battery"]["capacity_wh"])
     previous = state.battery_soc
     state.battery_soc = min(1.0, max(0.0, previous + energy_delta / capacity))
-    planner_wh = (
-        max(0.0, planner_power_w) * hours
-        if mode not in power.get("jetson_active_modes", [])
-        else 0.0
-    )
     state.cumulative_gross_wh += gross_wh
     state.cumulative_solar_wh += solar_wh
     state.cumulative_planner_wh += planner_wh
@@ -187,3 +181,18 @@ def power_step(
         "net_battery_depletion_wh": max(0.0, (previous - state.battery_soc) * capacity),
         "planner_compute_energy_wh": planner_wh,
     }
+
+
+def planner_event_energy_wh(config: dict[str, Any], mode: str, *, active_time_s: float) -> float:
+    """Return incremental event energy under the declared assumed/measured model."""
+
+    power = config["power"]
+    if mode in set(power.get("jetson_active_modes", [])):
+        return 0.0
+    model = power.get("planner_compute", {})
+    active_w = max(0.0, float(power.get("onboard_compute_w", 0.0)))
+    active_s = max(0.0, float(active_time_s))
+    boot_wh = max(0.0, float(model.get("boot_energy_wh", 0.0)))
+    idle_w = max(0.0, float(model.get("idle_power_w", 0.0)))
+    idle_s = max(0.0, float(model.get("idle_time_s", 0.0)))
+    return active_w * active_s / 3600.0 + boot_wh + idle_w * idle_s / 3600.0

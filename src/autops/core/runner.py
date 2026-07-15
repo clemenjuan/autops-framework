@@ -9,7 +9,7 @@ from typing import Any
 
 from autops.config import ExperimentSpec, asset_root, runtime_root
 from autops.core.plugin import create_representation
-from autops.core.provenance import collect_provenance
+from autops.core.provenance import collect_provenance, result_document_sha256
 from autops.memory.fixed import FixedMemory
 from autops.missions.eventsat.env import EventSatEnvironment
 from autops.missions.eventsat.metrics import METRIC_IDS, EventSatMetrics, experiment_statistics
@@ -149,7 +149,7 @@ class ExperimentRunner:
             if any(identity != identities[0] for identity in identities[1:]):
                 raise ValueError("LeWM episodes used inconsistent planner artifacts")
             experiment["planner_artifact_identity"] = identities[0]
-        return {
+        result = {
             "schema_version": 1,
             "experiment": experiment,
             "metric_registry": METRIC_IDS,
@@ -160,16 +160,28 @@ class ExperimentRunner:
             "episodes": episodes,
             "provenance": collect_provenance(experiment, asset_root()),
         }
+        result["result_id"] = result_document_sha256(result)
+        return result
 
     def _write_result(self, result: dict[str, Any]) -> Path:
+        document = dict(result)
+        expected_id = result_document_sha256(document)
+        supplied_id = document.get("result_id", expected_id)
+        if supplied_id != expected_id:
+            raise ValueError("result_id does not match immutable result content")
+        document["result_id"] = expected_id
         digest = str(result.get("provenance", {}).get("config_sha256", ""))
         if len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest):
             raise ValueError("result provenance must contain a lowercase config SHA-256")
         coordinate = Path(*self.spec.coordinate.split("/"))
         root = runtime_root() / self.spec.output_root / coordinate / digest[:12]
         root.mkdir(parents=True, exist_ok=True)
-        destination = root / "results.json"
-        temporary = root / ".results.json.tmp"
-        temporary.write_text(json.dumps(result, indent=2, sort_keys=True), encoding="utf-8")
-        temporary.replace(destination)
+        destination = root / f"{expected_id}.json"
+        serialized = json.dumps(document, allow_nan=False, indent=2, sort_keys=True)
+        try:
+            with destination.open("x", encoding="utf-8") as stream:
+                stream.write(serialized)
+        except FileExistsError:
+            if destination.read_text(encoding="utf-8") != serialized:
+                raise ValueError("refusing to overwrite immutable result ID") from None
         return destination

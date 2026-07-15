@@ -111,3 +111,29 @@ def test_candidate_seed_hook_is_strictly_masked_and_integer() -> None:
             config,
             seed_candidates=lambda sequences: sequences.astype(np.float64),
         )
+
+
+def test_projected_candidates_are_the_bank_scored_and_selected() -> None:
+    config = CEMConfig(
+        horizon=3,
+        action_dim=3,
+        samples=16,
+        elites=2,
+        iterations=2,
+        plan_hold=1,
+        seed=29,
+    )
+    scored: list[np.ndarray] = []
+
+    def project(sequences: np.ndarray) -> np.ndarray:
+        sequences[sequences == 1] = 0
+        return sequences
+
+    def score(sequences: np.ndarray) -> np.ndarray:
+        scored.append(sequences.copy())
+        return (sequences == 2).sum(axis=1).astype(np.float64)
+
+    result = categorical_cem(score, config, project_candidates=project)
+
+    assert all(not np.any(bank == 1) for bank in scored)
+    assert not np.any(result.action_sequence == 1)

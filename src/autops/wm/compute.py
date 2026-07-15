@@ -13,6 +13,7 @@ from autops.wm.cem import CEMConfig
 class PlannerComputeEvidence:
     planning_events: int = 0
     held_action_steps: int = 0
+    held_action_repairs: int = 0
     reflex_overrides: int = 0
     cem_latency_total_s: float = 0.0
     evaluated_rollouts: int = 0
@@ -20,6 +21,7 @@ class PlannerComputeEvidence:
     def reset(self) -> None:
         self.planning_events = 0
         self.held_action_steps = 0
+        self.held_action_repairs = 0
         self.reflex_overrides = 0
         self.cem_latency_total_s = 0.0
         self.evaluated_rollouts = 0
@@ -46,6 +48,10 @@ class PlannerComputeEvidence:
         return {
             "planning_events": self.planning_events,
             "held_action_steps": self.held_action_steps,
+            "held_action_repairs": self.held_action_repairs,
+            "future_action_repair_rate": (
+                self.held_action_repairs / self.held_action_steps if self.held_action_steps else 0.0
+            ),
             "reflex_overrides": self.reflex_overrides,
             "cem_latency_total_s": self.cem_latency_total_s,
             "cem_latency_mean_s": mean_latency,

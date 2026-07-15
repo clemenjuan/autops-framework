@@ -9,6 +9,7 @@ import numpy as np
 
 ProposalGuidance = Callable[[np.ndarray], np.ndarray]
 CandidateSeeder = Callable[[np.ndarray], np.ndarray]
+CandidateProjector = Callable[[np.ndarray], np.ndarray]
 
 
 @dataclass(frozen=True)
@@ -154,6 +155,25 @@ def _seeded(
     return values
 
 
+def _projected(
+    sequences: np.ndarray,
+    mask: np.ndarray,
+    project_candidates: CandidateProjector | None,
+) -> np.ndarray:
+    if project_candidates is None:
+        return sequences
+    projected = np.asarray(project_candidates(sequences.copy()))
+    if projected.shape != sequences.shape or not np.issubdtype(projected.dtype, np.integer):
+        raise ValueError("project_candidates must return an integer array matching candidates")
+    values = projected.astype(np.int64, copy=False)
+    if np.any((values < 0) | (values >= mask.shape[1])):
+        raise ValueError("project_candidates returned an invalid action")
+    allowed = mask[np.arange(mask.shape[0])[None, :], values]
+    if not np.all(allowed):
+        raise ValueError("project_candidates returned an action excluded by the CEM mask")
+    return values
+
+
 def categorical_cem(
     score: Callable[[np.ndarray], np.ndarray],
     config: CEMConfig | None = None,
@@ -164,13 +184,16 @@ def categorical_cem(
     initial: np.ndarray | None = None,
     proposal_guidance: ProposalGuidance | None = None,
     seed_candidates: CandidateSeeder | None = None,
+    project_candidates: CandidateProjector | None = None,
     rng: np.random.Generator | None = None,
 ) -> CEMResult:
     """Maximize one score per integer action sequence.
 
     proposal_guidance transforms the initial and every post-elite
-    distribution. seed_candidates transforms each freshly sampled batch
-    before scoring; both hooks are optional and strictly revalidated.
+    distribution. seed_candidates injects deterministic candidates, while
+    project_candidates maps the complete sampled bank to executable sequences
+    before scoring and elite selection. Hooks are optional and strictly
+    revalidated.
     """
 
     config = config or CEMConfig()
@@ -188,6 +211,7 @@ def categorical_cem(
     for _ in range(config.iterations):
         sequences = _sample(probabilities, config.samples, generator)
         sequences = _seeded(sequences, mask, seed_candidates)
+        sequences = _projected(sequences, mask, project_candidates)
         scores = np.asarray(score(sequences), dtype=np.float64).reshape(-1)
         if scores.shape != (config.samples,) or not np.isfinite(scores).all():
             raise ValueError("score must return one finite value per CEM sample")
@@ -230,6 +254,7 @@ def one_hot_sequences(sequences: np.ndarray, action_dim: int) -> np.ndarray:
 __all__ = [
     "CEMConfig",
     "CEMResult",
+    "CandidateProjector",
     "CandidateSeeder",
     "ProposalGuidance",
     "categorical_cem",

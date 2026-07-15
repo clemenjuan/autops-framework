@@ -13,7 +13,12 @@ from datetime import datetime
 from typing import Any
 
 from autops.core.types import EnvironmentStep
-from autops.missions.eventsat.physics import MODES, EventSatState, power_step
+from autops.missions.eventsat.physics import (
+    MODES,
+    EventSatState,
+    planner_event_energy_wh,
+    power_step,
+)
 from autops.missions.eventsat.transitions import (
     PipelineParameters,
     apply_can_transfer,
@@ -33,6 +38,7 @@ from autops.orbital import (
 
 class EventSatEnvironment:
     satellite_id = "eventsat_0"
+    planning_lookahead_steps = 48
 
     def __init__(
         self,
@@ -102,14 +108,23 @@ class EventSatEnvironment:
         return bool(self.orbit and self.orbit.is_ground_pass_active(self.state.step))
 
     def step(self, actions: dict[str, Any]) -> EnvironmentStep:
-        requested, planner_power_w = self._parse_action(actions)
+        requested, planner_active_s, planned = self._parse_action(actions)
         resolved = self._resolve_mode(requested)
         safety_safe = resolved == "safe"
         effective, in_transition = self._settle(resolved)
         sunlight = bool(self.orbit and self.orbit.is_in_sunlight(self.state.step))
         contact_s = float(self.orbit.contact_seconds(self.state.step)) if self.orbit else 0.0
+        planner_energy_wh = (
+            planner_event_energy_wh(self.config, effective, active_time_s=planner_active_s)
+            if planned
+            else 0.0
+        )
         energy = power_step(
-            self.state, self.config, effective, sunlight, planner_power_w=planner_power_w
+            self.state,
+            self.config,
+            effective,
+            sunlight,
+            planner_energy_wh=planner_energy_wh,
         )
         if contact_s > 0:
             self.state.total_contact_s += contact_s
@@ -150,6 +165,7 @@ class EventSatEnvironment:
                 or 0 < lookahead["time_to_next_pass"] <= self.settling_steps
             ),
             "health_status": "nominal" if state.active_anomaly is None else state.active_anomaly,
+            "previous_mode": state.previous_mode,
             "jetson_raw_mb": state.jetson_raw_mb,
             "jetson_compressed_mb": state.jetson_compressed_mb,
             "obc_data_mb": state.obc_data_mb,
@@ -168,6 +184,8 @@ class EventSatEnvironment:
             "compression_ratio": float(storage["compression_ratio"]),
             "detection_metadata_mb": float(storage["detection_metadata_mb"]),
             "jetson_to_obc_rate_kbps": float(storage["jetson_to_obc_rate_kbps"]),
+            "compression_time_factor": self.compression_steps,
+            "detection_time_steps": self.detection_steps,
             "downlink_rate_kbps": self.downlink_rate_kbps,
             "orbital_period_steps": self.orbital_period_steps,
             "settling_time_steps": self.settling_steps,
@@ -175,6 +193,7 @@ class EventSatEnvironment:
             "max_achievable_downlink_mb": max_downlink,
             "achievable_downlink_mb": lookahead["future_pass_capacity_mb"],
             "remaining_achievable_downlink_mb": self._remaining_downlink_mb(),
+            **self._planning_lookahead(),
         }
         return {
             "step": state.step,
@@ -209,16 +228,13 @@ class EventSatEnvironment:
             ],
         }
 
-    def _parse_action(self, actions: dict[str, Any]) -> tuple[str, float]:
+    def _parse_action(self, actions: dict[str, Any]) -> tuple[str, float, bool]:
         raw = actions.get(self.satellite_id, {}) if isinstance(actions, dict) else {}
         raw = raw if isinstance(raw, dict) else {}
         mode = str(raw.get("mode", "charging"))
-        planned = bool(raw.get("jetson_planned", True))
-        explicit = raw.get("planner_power_w")
-        if explicit is not None:
-            return mode, max(0.0, float(explicit)) if planned else 0.0
-        default = float(self.config["power"].get("onboard_compute_w", 0.0))
-        return mode, default if self.onboard_compute_active and planned else 0.0
+        planned = bool(raw.get("jetson_planned", False))
+        active_s = max(0.0, float(raw.get("planner_active_s", 0.0))) if planned else 0.0
+        return mode, active_s, planned
 
     def _resolve_mode(self, requested: str) -> str:
         if requested not in MODES:
@@ -387,6 +403,33 @@ class EventSatEnvironment:
     def _remaining_downlink_mb(self) -> float:
         seconds = self.orbit.remaining_contact_s(self.state.step) if self.orbit else 0.0
         return seconds * self.downlink_rate_kbps / 8.0 / 1000.0
+
+    def _planning_lookahead(self) -> dict[str, Any]:
+        """Expose deterministic exogenous inputs, never a second orbit model."""
+
+        state = self.state
+        offsets = range(self.planning_lookahead_steps)
+        power = self.config["power"]
+        solar = power["solar_panels"]
+        battery = power["battery"]
+        return {
+            "planning_contact_seconds": [
+                self.orbit.contact_seconds(state.step + offset) if self.orbit else 0.0
+                for offset in offsets
+            ],
+            "planning_sunlight": [
+                self.orbit.is_in_sunlight(state.step + offset) if self.orbit else False
+                for offset in offsets
+            ],
+            "battery_min_soc": float(battery["min_soc"]),
+            "planning_power": {
+                "consumption": power["consumption"],
+                "generation_peak_w": float(solar["generation_peak_w"]),
+                "panel_efficiency_factor": float(solar["panel_efficiency_factor"]),
+                "battery_capacity_wh": float(battery["capacity_wh"]),
+                "charge_efficiency": float(battery["charge_efficiency"]),
+            },
+        }
 
     def _pipeline_parameters(self) -> PipelineParameters:
         storage = self.config["storage"]

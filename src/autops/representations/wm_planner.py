@@ -32,8 +32,10 @@ from autops.wm.cem import (
 )
 from autops.wm.compute import PlannerComputeEvidence
 from autops.wm.guidance import (
+    admissible_action_mask,
     guided_probabilities,
     pipeline_scores,
+    project_executable_candidates,
     seed_pipeline_candidate,
 )
 from autops.wm.schema import EVENTSAT_ACTIONS, EVENTSAT_OBSERVATIONS
@@ -176,38 +178,13 @@ class EventSatLeWMCEM(Representation):
         }
 
     def mission_action_mask(self, state: Mapping[str, Any]) -> np.ndarray:
-        """Return actions admissible now; future CEM steps remain unconstrained."""
+        """Return the same admissibility mask used at every projected horizon step."""
 
-        mask = np.zeros(len(EVENTSAT_ACTIONS), dtype=bool)
-        mask[self._action_index["charging"]] = True
-        health = str(state.get("health_status", "nominal"))
-        soc = _number(state, "battery_soc", 0.5)
-        if health != "nominal" or soc <= 0.22:
-            mask[self._action_index["safe"]] = True
-            return mask
-
-        obc = _number(state, "obc_data_mb")
-        raw = _number(state, "jetson_raw_mb")
-        compressed = _number(state, "jetson_compressed_mb")
-        capacity = max(1.0, _number(state, "storage_capacity_mb", 4096.0))
-        stored = _number(state, "data_stored_mb", obc + raw + compressed)
-        physical = bool(state.get("physical_ground_pass_active", False))
-        estimated = bool(state.get("contact_window_active", state.get("ground_pass_active", False)))
-        settling = max(0, int(_number(state, "settling_time_steps")))
-        time_to_pass = _number(state, "time_to_next_pass", float("inf"))
-        precontact = not (physical or estimated) and 0.0 < time_to_pass <= settling
-        mask[self._action_index["communication"]] = (
-            (physical or estimated or precontact) and obc > 0.01 and soc >= self._comms_soc_floor
+        return admissible_action_mask(
+            state,
+            reserve_soc=self._reserve_soc,
+            comms_soc_floor=self._comms_soc_floor,
         )
-        if soc < self._reserve_soc:
-            return mask
-        mask[self._action_index["payload_observe"]] = stored < 0.80 * capacity
-        mask[self._action_index["payload_compress"]] = (
-            _number(state, "uncompressed_observations") > 0.0
-        )
-        mask[self._action_index["payload_detect"]] = _number(state, "undetected_observations") > 0.0
-        mask[self._action_index["payload_send"]] = compressed > 0.01 and obc < 0.98 * capacity
-        return mask
 
     def select_action(self, context: DecisionContext) -> dict[str, Any]:
         state = context.state
@@ -228,6 +205,7 @@ class EventSatLeWMCEM(Representation):
             repaired = held if mask[held] else self._fallback_action(state, mask)
             rationale = "executed held LeWM-CEM action"
             if repaired != held:
+                self._compute.held_action_repairs += 1
                 rationale = "repaired inadmissible held action with mission mask"
             return self._choose(repaired, planned=False, rationale=rationale)
 
@@ -242,6 +220,9 @@ class EventSatLeWMCEM(Representation):
         def seed_candidates(sequences: np.ndarray) -> np.ndarray:
             return self._seed_pipeline_candidate(state, sequences, mask)
 
+        def project_candidates(sequences: np.ndarray) -> np.ndarray:
+            return self._project_candidates(state, sequences)
+
         started = perf_counter()
         result = categorical_cem(
             score,
@@ -251,6 +232,7 @@ class EventSatLeWMCEM(Representation):
             initial=self._proposal_probabilities(),
             proposal_guidance=guide if self._contact_guidance else None,
             seed_candidates=seed_candidates if self._contact_guidance else None,
+            project_candidates=project_candidates,
             rng=self._rng,
         )
         elapsed = max(0.0, perf_counter() - started)
@@ -263,6 +245,7 @@ class EventSatLeWMCEM(Representation):
             int(sequence[0]),
             planned=True,
             rationale=f"LeWM-CEM planning event score={result.score:.6g}",
+            planner_active_s=elapsed,
         )
 
     def _proposal_probabilities(self) -> np.ndarray:
@@ -362,6 +345,15 @@ class EventSatLeWMCEM(Representation):
     ) -> np.ndarray:
         return seed_pipeline_candidate(state, sequences, first_action_mask=first_mask)
 
+    def _project_candidates(self, state: Mapping[str, Any], sequences: np.ndarray) -> np.ndarray:
+        projection = project_executable_candidates(
+            state,
+            sequences,
+            reserve_soc=self._reserve_soc,
+            comms_soc_floor=self._comms_soc_floor,
+        )
+        return projection.sequences
+
     def _lightweight_pipeline_scores(
         self, state: Mapping[str, Any], sequences: np.ndarray
     ) -> np.ndarray:
@@ -373,6 +365,8 @@ class EventSatLeWMCEM(Representation):
             pass_stage_reward=self._pass_stage_reward,
             reference_weight=self._downlink_reference_weight,
             undeliverable_penalty=self._undeliverable_capacity_penalty,
+            reserve_soc=self._reserve_soc,
+            comms_soc_floor=self._comms_soc_floor,
         )
 
     def _torch_attributes(self, history: Mapping[str, Any], sequences: np.ndarray) -> np.ndarray:
@@ -427,7 +421,14 @@ class EventSatLeWMCEM(Representation):
             return charging
         return int(np.flatnonzero(mask)[0])
 
-    def _choose(self, index: int, *, planned: bool, rationale: str) -> dict[str, Any]:
+    def _choose(
+        self,
+        index: int,
+        *,
+        planned: bool,
+        rationale: str,
+        planner_active_s: float = 0.0,
+    ) -> dict[str, Any]:
         self._last_action = int(index)
         if self._action_history:
             self._action_history[-1] = np.eye(self.artifact.model.action_dim, dtype=np.float32)[
@@ -435,7 +436,10 @@ class EventSatLeWMCEM(Representation):
             ]
         mode = self.artifact.model.action_names[index]
         self._last_rationale = rationale
-        return {"eventsat_0": {"mode": mode, "jetson_planned": planned}}
+        action: dict[str, Any] = {"mode": mode, "jetson_planned": planned}
+        if planned:
+            action["planner_active_s"] = max(0.0, float(planner_active_s))
+        return {"eventsat_0": action}
 
 
 __all__ = ["EventSatLeWMCEM", "RolloutScorer"]

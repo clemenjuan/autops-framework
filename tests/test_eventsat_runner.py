@@ -11,6 +11,7 @@ from autops.core.runner import ExperimentRunner
 from autops.core.types import DecisionContext
 from autops.missions.eventsat.env import EventSatEnvironment
 from autops.missions.eventsat.metrics import METRIC_IDS
+from autops.missions.eventsat.physics import planner_event_energy_wh
 from autops.paradigms.base import ParadigmDecision, refresh_almanac
 from autops.representations.symb import EventSatSymbolicScheduler
 
@@ -33,6 +34,22 @@ def test_fallback_environment_uses_configured_physics() -> None:
     assert step.info["gross_energy_consumed_wh"] == pytest.approx(expected_gross_wh)
     assert step.info["solar_generation_wh"] == 0.0
     assert step.info["battery_soc"] == pytest.approx(0.8 - expected_gross_wh / 70.0)
+
+
+def test_planner_energy_uses_measured_event_time_and_never_double_counts_jetson() -> None:
+    config = deepcopy(expand_coordinate("eventsat/sas/ao/symb").mission_config)
+    config["power"]["onboard_compute_w"] = 21.0
+    config["power"]["planner_compute"] = {
+        "boot_energy_wh": 0.01,
+        "idle_power_w": 2.0,
+        "idle_time_s": 3.0,
+        "evidence_source": "assumed",
+    }
+
+    energy = planner_event_energy_wh(config, "charging", active_time_s=1.2)
+
+    assert energy == pytest.approx(21.0 * 1.2 / 3600.0 + 0.01 + 2.0 * 3.0 / 3600.0)
+    assert planner_event_energy_wh(config, "payload_compress", active_time_s=1.2) == 0.0
 
 
 def test_refresh_almanac_updates_clock_without_truth_or_resource_leaks() -> None:
@@ -138,7 +155,7 @@ def test_runner_persists_planner_diagnostics_and_existing_compute_energy(
                     "eventsat_0": {
                         "mode": "charging",
                         "jetson_planned": True,
-                        "planner_power_w": 6.0,
+                        "planner_active_s": 2.0,
                     }
                 }
             )
@@ -158,6 +175,6 @@ def test_runner_persists_planner_diagnostics_and_existing_compute_energy(
     result = ExperimentRunner(spec, save=False, prefer_orekit=False).run()
     episode = result["episodes"][0]
 
-    assert episode["planner_compute_energy_wh"] == pytest.approx(0.3)
+    assert episode["planner_compute_energy_wh"] == pytest.approx(7.0 * 6.0 / 3600.0)
     assert episode["decision_diagnostics"]["onboard"] == {"planning_events": 3}
     assert "planner_compute_energy_wh" not in result["metric_registry"].values()

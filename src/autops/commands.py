@@ -9,8 +9,8 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-from autops.board.generator import build_board
-from autops.config import expand_coordinate, parse_overrides, runtime_root
+from autops.board.generator import build_manifest_board
+from autops.config import asset_root, expand_coordinate, parse_overrides, runtime_root
 from autops.core.exporter import export_traces
 from autops.core.probe_audit import audit_probe_decodability
 from autops.core.runner import ExperimentRunner
@@ -116,7 +116,11 @@ def parser() -> argparse.ArgumentParser:
     audit.add_argument("--validation-episodes", type=int, default=3)
 
     board = commands.add_parser("board", help="build the unified static results board")
-    board.add_argument("--results", type=Path, default=Path("results"))
+    board.add_argument(
+        "--manifest",
+        type=Path,
+        default=Path("configs/papers/paper_a.yaml"),
+    )
     board.add_argument("--output", type=Path, default=Path("boards/index.html"))
     board.add_argument("--title", default="AUTOPS results")
     return root
@@ -219,9 +223,9 @@ def _train(args: argparse.Namespace) -> dict[str, Any]:
 
 def _board(args: argparse.Namespace) -> dict[str, Any]:
     root = runtime_root()
-    results = args.results if args.results.is_absolute() else root / args.results
+    manifest = args.manifest if args.manifest.is_absolute() else asset_root() / args.manifest
     output = args.output if args.output.is_absolute() else root / args.output
-    return {"board": str(build_board(results, output, title=args.title))}
+    return {"board": str(build_manifest_board(manifest, root, output, title=args.title))}
 
 
 def _json_safe(value: Any) -> Any:

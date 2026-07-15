@@ -5,6 +5,7 @@ import pytest
 
 from autops.wm.audit import compare_probe_heads, rank_auc, stack_feature_history
 from autops.wm.dataset import EpisodeSplit
+from autops.wm.scoring import candidate_selection_metrics
 
 
 def test_history_padding_never_crosses_episode_boundaries() -> None:
@@ -16,6 +17,22 @@ def test_history_padding_never_crosses_episode_boundaries() -> None:
 def test_rank_auc_handles_perfect_order_and_ties() -> None:
     assert rank_auc(np.asarray([0.0, 0.1, 0.9, 1.0]), np.asarray([0, 0, 1, 1])) == 1.0
     assert rank_auc(np.ones(4), np.asarray([0, 0, 1, 1])) == 0.5
+
+
+def test_candidate_selection_metrics_compare_one_shared_bank_to_oracle() -> None:
+    oracle = np.asarray([[0.0, 1.0, 2.0, 3.0], [4.0, 3.0, 2.0, 1.0]])
+    scores = {
+        "terminal_affine": np.asarray([[0.0, 1.0, 3.0, 2.0], [1.0, 2.0, 3.0, 4.0]]),
+        "windowed_affine": oracle.copy(),
+        "mlp": oracle.copy(),
+    }
+
+    evidence = candidate_selection_metrics(scores, oracle, elites=2)
+
+    assert evidence["windowed_affine"]["top_elite_overlap"] == 1.0
+    assert evidence["mlp"]["analytical_regret_mean"] == 0.0
+    assert evidence["terminal_affine"]["top_elite_overlap"] == pytest.approx(0.5)
+    assert evidence["terminal_affine"]["analytical_regret_mean"] == pytest.approx(2.0)
 
 
 def test_mlp_reveals_nonlinear_xor_gap() -> None:

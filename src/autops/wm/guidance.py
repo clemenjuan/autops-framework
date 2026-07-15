@@ -1,8 +1,9 @@
-"""Lightweight EventSat contact guidance for learned world-model planning.
+"""Executable EventSat candidate projection and contact guidance.
 
-The helpers account for requested actions, byte-pipeline feasibility, and the
-onboard contact almanac. They deliberately do not roll power, ADCS physics, or
-orbital dynamics, so LeWM-CEM remains distinct from the analytical comparator.
+Every CEM candidate is projected through the authoritative atomic byte
+transitions before either learned or analytical scoring. The projector mirrors
+environment settling, progress, health, storage, and battery rules. It uses the
+onboard contact/sunlight almanac but never propagates orbital dynamics.
 """
 
 from __future__ import annotations
@@ -13,6 +14,14 @@ from typing import Any
 
 import numpy as np
 
+from autops.missions.eventsat.transitions import (
+    PipelineParameters,
+    apply_can_transfer,
+    apply_compress,
+    apply_detect,
+    apply_downlink,
+    apply_observe,
+)
 from autops.wm.schema import EVENTSAT_ACTIONS
 
 _ACTION = {name: index for index, name in enumerate(EVENTSAT_ACTIONS)}
@@ -31,6 +40,12 @@ def contact_capacities(state: Mapping[str, Any], horizon: int) -> np.ndarray:
     capacities = np.zeros(horizon, dtype=np.float64)
     step_s = max(1e-12, _number(state, "step_duration_s", 60.0))
     rate = max(0.0, _number(state, "downlink_rate_kbps", 50.0))
+    scheduled = state.get("planning_contact_seconds")
+    if isinstance(scheduled, (list, tuple, np.ndarray)):
+        seconds = np.asarray(scheduled, dtype=np.float64).reshape(-1)
+        count = min(horizon, seconds.size)
+        capacities[:count] = np.maximum(0.0, seconds[:count]) * rate / 8000.0
+        return capacities
     cache = state.get("_analytic_orbit_cache")
     if isinstance(cache, Mapping):
         first = int(_number(state, "timestep"))
@@ -75,6 +90,230 @@ def contact_capacities(state: Mapping[str, Any], horizon: int) -> np.ndarray:
             future_s -= overlap_s
             offset += 1
     return capacities
+
+
+def admissible_action_mask(
+    state: Mapping[str, Any],
+    *,
+    reserve_soc: float,
+    comms_soc_floor: float,
+    future_contact_mb: np.ndarray | None = None,
+) -> np.ndarray:
+    """Return mission-policy actions admissible from one projected state."""
+
+    mask = np.zeros(len(EVENTSAT_ACTIONS), dtype=bool)
+    mask[_ACTION["charging"]] = True
+    health = str(state.get("health_status", "nominal"))
+    soc = _number(state, "battery_soc", 0.5)
+    minimum_soc = _number(state, "battery_min_soc", 0.20)
+    if health != "nominal" or soc <= minimum_soc + 0.02:
+        mask[_ACTION["safe"]] = True
+        return mask
+
+    obc = _number(state, "obc_data_mb")
+    raw = _number(state, "jetson_raw_mb")
+    compressed = _number(state, "jetson_compressed_mb")
+    obc_capacity = max(0.0, _number(state, "storage_capacity_mb", 4096.0))
+    jetson_capacity = max(0.0, _number(state, "jetson_capacity_mb", 249036.8))
+    physical = bool(state.get("physical_ground_pass_active", False)) or (
+        _number(state, "contact_window_seconds") > 0.0
+    )
+    estimated = bool(state.get("contact_window_active", state.get("ground_pass_active", False)))
+    settling = max(0, int(_number(state, "settling_time_steps")))
+    if future_contact_mb is None:
+        time_to_pass = _number(state, "time_to_next_pass", float("inf"))
+        precontact = 0.0 < time_to_pass <= settling
+    else:
+        contacts = np.flatnonzero(np.asarray(future_contact_mb) > 0.0)
+        precontact = bool(contacts.size and int(contacts[0]) <= settling)
+    mask[_ACTION["communication"]] = (
+        (physical or estimated or precontact) and obc > 0.01 and soc >= comms_soc_floor
+    )
+    if soc < reserve_soc:
+        return mask
+    observation_mb = _number(state, "observation_size_mb", 9.41)
+    mask[_ACTION["payload_observe"]] = raw + compressed + observation_mb <= (
+        jetson_capacity + 1e-12
+    )
+    mask[_ACTION["payload_compress"]] = (
+        _number(state, "uncompressed_observations") >= 1.0 and raw + 1e-12 >= observation_mb
+    )
+    mask[_ACTION["payload_detect"]] = (
+        _number(state, "undetected_observations") >= 1.0
+        and obc + _number(state, "detection_metadata_mb", 0.01) <= obc_capacity + 1e-12
+    )
+    mask[_ACTION["payload_send"]] = compressed > 0.01 and obc < obc_capacity - 1e-12
+    return mask
+
+
+@dataclass(frozen=True)
+class CandidateProjection:
+    """An executable candidate bank and its propagated terminal states."""
+
+    sequences: np.ndarray
+    terminal_states: tuple[dict[str, Any], ...]
+    repair_counts: np.ndarray
+
+
+def _transition_parameters(state: Mapping[str, Any]) -> PipelineParameters:
+    return PipelineParameters(
+        observation_size_mb=max(0.0, _number(state, "observation_size_mb", 9.41)),
+        compression_ratio=max(1e-12, _number(state, "compression_ratio", 5.11)),
+        jetson_capacity_mb=max(0.0, _number(state, "jetson_capacity_mb", 249036.8)),
+        obc_capacity_mb=max(0.0, _number(state, "storage_capacity_mb", 4096.0)),
+        detection_metadata_mb=max(0.0, _number(state, "detection_metadata_mb", 0.01)),
+        jetson_to_obc_rate_kbps=max(0.0, _number(state, "jetson_to_obc_rate_kbps", 8000.0)),
+        downlink_rate_kbps=max(0.0, _number(state, "downlink_rate_kbps", 50.0)),
+        step_duration_s=max(1e-12, _number(state, "step_duration_s", 60.0)),
+    )
+
+
+def _planning_sunlight(state: Mapping[str, Any], horizon: int) -> np.ndarray:
+    scheduled = state.get("planning_sunlight")
+    default = bool(state.get("in_sunlight", False))
+    if not isinstance(scheduled, (list, tuple, np.ndarray)):
+        return np.full(horizon, default, dtype=bool)
+    values = np.asarray(scheduled, dtype=bool).reshape(-1)
+    if values.size >= horizon:
+        return values[:horizon]
+    return np.concatenate([values, np.full(horizon - values.size, default, dtype=bool)])
+
+
+def _advance_battery(state: dict[str, Any], effective: int, sunlight: bool) -> None:
+    power = state.get("planning_power")
+    if not isinstance(power, Mapping):
+        return
+    consumption = power.get("consumption")
+    mode = EVENTSAT_ACTIONS[effective]
+    mode_power = consumption.get(mode) if isinstance(consumption, Mapping) else None
+    if not isinstance(mode_power, Mapping):
+        return
+    phase = "sun_w" if sunlight else "eclipse_w"
+    load_w = max(0.0, _number(mode_power, phase))
+    solar_w = 0.0
+    if sunlight:
+        solar_w = max(0.0, _number(power, "generation_peak_w")) * max(
+            0.0, _number(power, "panel_efficiency_factor", 1.0)
+        )
+    hours = max(1e-12, _number(state, "step_duration_s", 60.0)) / 3600.0
+    delta_wh = (solar_w - load_w) * hours
+    if delta_wh > 0.0:
+        delta_wh *= min(1.0, max(0.0, _number(power, "charge_efficiency", 1.0)))
+    capacity_wh = max(1e-12, _number(power, "battery_capacity_wh", 70.0))
+    state["battery_soc"] = min(
+        1.0, max(0.0, _number(state, "battery_soc", 0.5) + delta_wh / capacity_wh)
+    )
+
+
+def _fallback(mask: np.ndarray, state: Mapping[str, Any]) -> int:
+    safe = _ACTION["safe"]
+    if str(state.get("health_status", "nominal")) != "nominal" and mask[safe]:
+        return safe
+    charging = _ACTION["charging"]
+    return charging if mask[charging] else int(np.flatnonzero(mask)[0])
+
+
+def _resolved_action(state: dict[str, Any], requested: int, settling: int) -> int:
+    transition = max(0, int(_number(state, "transition_steps_remaining")))
+    if transition > 0:
+        transition -= 1
+        state["transition_steps_remaining"] = transition
+        if transition == 0:
+            state["previous_mode"] = EVENTSAT_ACTIONS[requested]
+        return _ACTION["charging"]
+    previous = _ACTION.get(
+        str(state.get("previous_mode", state.get("current_mode", "charging"))),
+        _ACTION["charging"],
+    )
+    maneuver = {_ACTION["payload_observe"], _ACTION["communication"]}
+    if previous != requested and (previous in maneuver or requested in maneuver) and settling > 0:
+        state["transition_steps_remaining"] = settling - 1
+        if settling == 1:
+            state["previous_mode"] = EVENTSAT_ACTIONS[requested]
+        return _ACTION["charging"]
+    state["previous_mode"] = EVENTSAT_ACTIONS[requested]
+    return requested
+
+
+def _apply_projected_action(
+    state: dict[str, Any], effective: int, parameters: PipelineParameters, contact_s: float
+) -> None:
+    previous_effective = str(state.get("current_mode", "charging"))
+    if effective != _ACTION["payload_compress"] and previous_effective == "payload_compress":
+        state["compression_progress"] = 0
+    if effective != _ACTION["payload_detect"] and previous_effective == "payload_detect":
+        state["detection_progress"] = 0
+    transition = None
+    if effective == _ACTION["payload_observe"]:
+        transition = apply_observe(state, parameters)
+    elif effective == _ACTION["payload_compress"]:
+        state["compression_progress"] = int(_number(state, "compression_progress")) + 1
+        required = max(1, int(np.ceil(_number(state, "compression_time_factor", 2.0))))
+        if state["compression_progress"] >= required:
+            transition = apply_compress(state, parameters)
+            if transition.accepted:
+                state["compression_progress"] = 0
+    elif effective == _ACTION["payload_detect"]:
+        state["detection_progress"] = int(_number(state, "detection_progress")) + 1
+        required = max(1, int(np.ceil(_number(state, "detection_time_steps", 5.0))))
+        if state["detection_progress"] >= required:
+            transition = apply_detect(state, parameters)
+            if transition.accepted:
+                state["detection_progress"] = 0
+    elif effective == _ACTION["payload_send"]:
+        transition = apply_can_transfer(state, parameters)
+    elif effective == _ACTION["communication"] and contact_s > 0.0:
+        transition = apply_downlink(state, parameters, contact_seconds=contact_s)
+    if transition is not None and transition.accepted:
+        state.update(transition.state)
+    state["current_mode"] = EVENTSAT_ACTIONS[effective]
+
+
+def project_executable_candidates(
+    state: Mapping[str, Any],
+    sequences: np.ndarray,
+    *,
+    reserve_soc: float,
+    comms_soc_floor: float,
+) -> CandidateProjection:
+    """Propagate feasibility through every action of every candidate."""
+
+    requested = np.asarray(sequences)
+    if requested.ndim != 2 or not np.issubdtype(requested.dtype, np.integer):
+        raise ValueError("candidate sequences must be a two-dimensional integer array")
+    if np.any((requested < 0) | (requested >= len(EVENTSAT_ACTIONS))):
+        raise ValueError("candidate sequences contain an invalid EventSat action")
+    horizon = requested.shape[1]
+    capacities = contact_capacities(state, horizon)
+    rate = max(1e-12, _number(state, "downlink_rate_kbps", 50.0))
+    contacts_s = capacities * 8000.0 / rate
+    sunlight = _planning_sunlight(state, horizon)
+    parameters = _transition_parameters(state)
+    settling = max(0, int(_number(state, "settling_time_steps")))
+    projected = requested.astype(np.int64, copy=True)
+    repairs = np.zeros(requested.shape[0], dtype=np.int64)
+    terminal: list[dict[str, Any]] = []
+    for sample, row in enumerate(requested):
+        simulation = dict(state)
+        for offset, requested_value in enumerate(row):
+            simulation["contact_window_seconds"] = float(contacts_s[offset])
+            simulation["physical_ground_pass_active"] = contacts_s[offset] > 0.0
+            mask = admissible_action_mask(
+                simulation,
+                reserve_soc=reserve_soc,
+                comms_soc_floor=comms_soc_floor,
+                future_contact_mb=capacities[offset:],
+            )
+            action = int(requested_value)
+            if not mask[action]:
+                action = _fallback(mask, simulation)
+                repairs[sample] += 1
+            projected[sample, offset] = action
+            effective = _resolved_action(simulation, action, settling)
+            _apply_projected_action(simulation, effective, parameters, float(contacts_s[offset]))
+            _advance_battery(simulation, effective, bool(sunlight[offset]))
+        terminal.append(simulation)
+    return CandidateProjection(projected, tuple(terminal), repairs)
 
 
 def guided_probabilities(
@@ -171,165 +410,48 @@ def seed_pipeline_candidate(
     return values
 
 
-@dataclass(frozen=True)
-class _PipelineParameters:
-    capacities: np.ndarray
-    observation_mb: float
-    ratio: float
-    product_mb: float
-    compression_steps: int
-    send_mb: float
-    obc_capacity: float
-    settling: int
-    maneuver: set[int]
-    initial_previous: int
-    downlink_scale: float
-    has_remaining_capacity: bool
-    downlink_reward: float
-    pass_stage_reward: float
-    undeliverable_penalty: float
-
-
-@dataclass
-class _PipelineState:
-    raw: float
-    compressed: float
-    obc: float
-    uncompressed: int
-    progress: float
-    transition: int
-    previous: int
-    downlinked: float = 0.0
-
-
-def _pipeline_parameters(
+def _pipeline_score(
     state: Mapping[str, Any],
+    terminal: Mapping[str, Any],
     horizon: int,
     *,
-    downlink_weight: float,
+    downlink_scale: float,
     downlink_reward: float,
     pass_stage_reward: float,
-    reference_weight: float,
     undeliverable_penalty: float,
-) -> _PipelineParameters:
-    step_s = max(1e-12, _number(state, "step_duration_s", 60.0))
-    observation_mb = max(0.0, _number(state, "observation_size_mb", 9.41))
-    ratio = max(1e-12, _number(state, "compression_ratio", 5.11))
-    initial_mode = str(state.get("previous_mode", state.get("current_mode", "charging")))
-    return _PipelineParameters(
-        capacities=contact_capacities(state, horizon),
-        observation_mb=observation_mb,
-        ratio=ratio,
-        product_mb=observation_mb / ratio,
-        compression_steps=max(1, int(np.ceil(_number(state, "compression_time_factor", 2.0)))),
-        send_mb=max(0.0, _number(state, "jetson_to_obc_rate_kbps", 8000.0)) * step_s / 8000.0,
-        obc_capacity=max(0.0, _number(state, "storage_capacity_mb", 4096.0)),
-        settling=max(0, int(_number(state, "settling_time_steps"))),
-        maneuver={_ACTION["payload_observe"], _ACTION["communication"]},
-        initial_previous=_ACTION.get(initial_mode, _ACTION["charging"]),
-        downlink_scale=downlink_weight / reference_weight,
-        has_remaining_capacity=state.get("remaining_achievable_downlink_mb") is not None,
-        downlink_reward=downlink_reward,
-        pass_stage_reward=pass_stage_reward,
-        undeliverable_penalty=undeliverable_penalty,
-    )
-
-
-def _pipeline_state(state: Mapping[str, Any], parameters: _PipelineParameters) -> _PipelineState:
-    return _PipelineState(
-        raw=_number(state, "jetson_raw_mb"),
-        compressed=_number(state, "jetson_compressed_mb"),
-        obc=_number(state, "obc_data_mb"),
-        uncompressed=max(0, int(_number(state, "uncompressed_observations"))),
-        progress=max(0.0, _number(state, "compression_progress")),
-        transition=max(0, int(_number(state, "transition_steps_remaining"))),
-        previous=parameters.initial_previous,
-    )
-
-
-def _effective_action(
-    simulation: _PipelineState, requested: int, parameters: _PipelineParameters
-) -> int:
-    if simulation.transition > 0:
-        simulation.transition -= 1
-        if simulation.transition == 0:
-            simulation.previous = requested
-        return _ACTION["charging"]
-    if simulation.previous != requested and (
-        simulation.previous in parameters.maneuver or requested in parameters.maneuver
-    ):
-        simulation.transition = max(0, parameters.settling - 1)
-        if simulation.transition == 0:
-            simulation.previous = requested
-        return _ACTION["charging"]
-    simulation.previous = requested
-    return requested
-
-
-def _apply_pipeline_action(
-    simulation: _PipelineState,
-    effective: int,
-    capacity: float,
-    parameters: _PipelineParameters,
-) -> None:
-    if effective != _ACTION["payload_compress"]:
-        simulation.progress = 0.0
-    if effective == _ACTION["payload_observe"]:
-        simulation.raw += parameters.observation_mb
-        simulation.uncompressed += 1
-    elif effective == _ACTION["payload_compress"] and simulation.uncompressed > 0:
-        simulation.progress += 1.0
-        if simulation.progress >= parameters.compression_steps:
-            simulation.raw = max(0.0, simulation.raw - parameters.observation_mb)
-            simulation.compressed += parameters.product_mb
-            simulation.uncompressed -= 1
-            simulation.progress = 0.0
-    elif effective == _ACTION["payload_send"]:
-        transfer = min(
-            simulation.compressed,
-            parameters.send_mb,
-            max(0.0, parameters.obc_capacity - simulation.obc),
-        )
-        simulation.compressed -= transfer
-        simulation.obc += transfer
-    elif effective == _ACTION["communication"]:
-        transfer = min(simulation.obc, capacity)
-        simulation.obc -= transfer
-        simulation.downlinked += transfer
-
-
-def _pipeline_score(
-    state: Mapping[str, Any], row: np.ndarray, parameters: _PipelineParameters
 ) -> float:
-    simulation = _pipeline_state(state, parameters)
-    for offset, requested_value in enumerate(row):
-        effective = _effective_action(simulation, int(requested_value), parameters)
-        _apply_pipeline_action(simulation, effective, parameters.capacities[offset], parameters)
-    staged = simulation.obc + simulation.compressed + simulation.raw / parameters.ratio
+    ratio = max(1e-12, _number(state, "compression_ratio", 5.11))
+    staged = (
+        _number(terminal, "obc_data_mb")
+        + _number(terminal, "jetson_compressed_mb")
+        + _number(terminal, "jetson_raw_mb") / ratio
+    )
+    downlinked = max(
+        0.0,
+        _number(terminal, "data_downlinked_mb") - _number(state, "data_downlinked_mb"),
+    )
     excess = 0.0
-    if parameters.has_remaining_capacity:
+    if state.get("remaining_achievable_downlink_mb") is not None:
         remaining_after = max(
             0.0,
-            _number(state, "remaining_achievable_downlink_mb") - simulation.downlinked,
+            _number(state, "remaining_achievable_downlink_mb") - downlinked,
         )
         excess = max(0.0, staged - remaining_after)
     period = max(1.0, _number(state, "orbital_period_steps", 94.0))
     time_after_horizon = max(
         0.0,
-        _number(state, "time_to_next_pass", period) - len(row),
+        _number(state, "time_to_next_pass", period) - horizon,
     )
     proximity = max(0.0, 1.0 - time_after_horizon / period)
     stage_bonus = (
-        parameters.pass_stage_reward
-        * parameters.downlink_scale
-        * min(simulation.obc, 10.0)
+        pass_stage_reward
+        * downlink_scale
+        * min(_number(terminal, "obc_data_mb"), 10.0)
         / 10.0
         * (0.25 + 0.75 * proximity)
     )
     return (
-        parameters.downlink_reward * parameters.downlink_scale * simulation.downlinked
-        + stage_bonus
-        - parameters.undeliverable_penalty * excess
+        downlink_reward * downlink_scale * downlinked + stage_bonus - undeliverable_penalty * excess
     )
 
 
@@ -342,29 +464,37 @@ def pipeline_scores(
     pass_stage_reward: float,
     reference_weight: float,
     undeliverable_penalty: float,
+    reserve_soc: float = 0.5,
+    comms_soc_floor: float = 0.25,
 ) -> np.ndarray:
-    """Score feasible pipeline bytes and contacts, never power or orbital dynamics."""
+    """Score the exact projected byte-pipeline effects of one candidate bank."""
 
     scores = np.zeros(sequences.shape[0], dtype=np.float64)
     if sequences.shape[1] == 0:
         return scores
-    parameters = _pipeline_parameters(
-        state,
-        sequences.shape[1],
-        downlink_weight=downlink_weight,
-        downlink_reward=downlink_reward,
-        pass_stage_reward=pass_stage_reward,
-        reference_weight=reference_weight,
-        undeliverable_penalty=undeliverable_penalty,
+    projection = project_executable_candidates(
+        state, sequences, reserve_soc=reserve_soc, comms_soc_floor=comms_soc_floor
     )
-    for sample, row in enumerate(sequences):
-        scores[sample] = _pipeline_score(state, row, parameters)
+    downlink_scale = downlink_weight / reference_weight
+    for sample, terminal in enumerate(projection.terminal_states):
+        scores[sample] = _pipeline_score(
+            state,
+            terminal,
+            sequences.shape[1],
+            downlink_scale=downlink_scale,
+            downlink_reward=downlink_reward,
+            pass_stage_reward=pass_stage_reward,
+            undeliverable_penalty=undeliverable_penalty,
+        )
     return scores
 
 
 __all__ = [
+    "CandidateProjection",
+    "admissible_action_mask",
     "contact_capacities",
     "guided_probabilities",
     "pipeline_scores",
+    "project_executable_candidates",
     "seed_pipeline_candidate",
 ]

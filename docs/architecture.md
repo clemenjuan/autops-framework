@@ -92,6 +92,31 @@ call the same CEM function. This representation follows the world-model control 
 demonstrated by Hafner et al. [2]; the exact AUTOPS contract is deliberately narrower
 and auditable.
 
+Before scoring or elite selection, every sampled EventSat sequence is projected across
+the complete horizon by `autops.wm.guidance.project_executable_candidates`. It mirrors
+settling, health and battery constraints and calls the atomic transitions in
+`autops.missions.eventsat.transitions` for observe, compress, detect, CAN transfer, and
+physical-contact downlink. CEM therefore returns executable requested commands, and the
+learned scorer, pipeline shaping, and analytical oracle consume the identical projected
+candidate bank. Held-action fallbacks remain as a runtime guard and report their own
+repair rate.
+
+Terminal affine remains the deployed readout until selection-level evidence justifies a
+change. `autops.wm.scoring.candidate_selection_metrics` compares terminal-affine,
+windowed-affine, and MLP scores on one shared bank using top-elite overlap and analytical
+regret; probe R²/AUC alone is not deployment evidence.
+
+Planner compute uses an event model rather than a full-step surrogate:
+
+\[
+E_{event}=P_{active}t_{plan}+E_{boot}+P_{idle}t_{idle}.
+\]
+
+`planner_active_s` is measured around CEM execution. The power and boot/idle terms are
+declared under `power` in the mission configuration and are labelled `assumed` unless
+replaced by hardware evidence. Incremental planner energy is zero in modes whose base
+load already includes the Jetson.
+
 ## Commands and runtime data
 
 ```bash
@@ -102,10 +127,10 @@ uv run autops train wm ...
 uv run autops train probes ...
 uv run autops train evaluate TRACE --artifact PLANNER.json --output EVAL.json
 uv run autops train audit ...
-uv run autops board [--results PATH] [--output PATH]
+uv run autops board [--manifest PATH] [--output PATH]
 ```
 
-`run` emits one atomic `results.json`. `sweep` expands applicable matrix coordinates;
+`run` emits an append-only, content-addressed result JSON. `sweep` expands applicable matrix coordinates;
 it does not create YAML. `export` writes the shared trace contract for either mission;
 with multiple compatible coordinates, episode and seed options apply per coordinate and
 the output retains source hashes/revisions, dirty state, actual orbital backend, and canonical concatenated episode IDs.
@@ -114,8 +139,11 @@ planner artifact. `train evaluate` verifies the trace, artifact, and checkpoint 
 then runs the deployed categorical CEM and shared latent scorer on deterministic contexts
 from held-out episodes. Its portable JSON records plans, learned and realised scores,
 attribute calibration, aggregate evidence, and source/runtime provenance without input
-paths. `train audit` compares linear and nonlinear frozen-feature readouts. `board` fails
-closed on empty, incomplete, non-finite, duplicate, or provenance-free result documents.
+paths. `train audit` compares linear and nonlinear frozen-feature readouts. The paper-facing
+`board` reads only approved identities from `configs/papers/paper_a.yaml` and verifies the
+result ID, commit, configuration, and checkpoint hashes. Diagnostic entries remain
+preserved but excluded. Board generation fails closed on an empty approval list or on
+incomplete, non-finite, duplicate, mismatched, or provenance-free results.
 
 Runtime outputs are relative to the invoking working directory, or to `AUTOPS_ROOT`
 when it is set. Immutable packaged assets are resolved independently of runtime output.

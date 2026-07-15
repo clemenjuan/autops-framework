@@ -15,7 +15,9 @@ from autops.wm.artifact import (
     ProbeEvidenceContract,
 )
 from autops.wm.cem import CEMConfig
+from autops.wm.guidance import project_executable_candidates
 from autops.wm.schema import EVENTSAT_ACTIONS, EVENTSAT_OBSERVATIONS
+from autops.wm.scoring import analytical_candidate_attributes
 
 
 def _evidence(attributes: tuple[str, ...]) -> ProbeEvidenceContract:
@@ -242,3 +244,72 @@ def test_planner_injects_pipeline_candidate_at_every_cem_iteration() -> None:
     )
     assert len(scored_first_candidates) == 3
     assert all(np.array_equal(candidate, expected) for candidate in scored_first_candidates)
+
+
+def test_projection_propagates_complete_pipeline_through_future_actions() -> None:
+    actions = {name: EVENTSAT_ACTIONS.index(name) for name in EVENTSAT_ACTIONS}
+    state = _state(
+        jetson_raw_mb=9.41,
+        uncompressed_observations=1,
+        detection_time_steps=5,
+        planning_contact_seconds=[0.0] * 8 + [60.0],
+    )
+    requested = np.asarray(
+        [
+            [
+                actions["payload_compress"],
+                actions["payload_compress"],
+                *([actions["payload_detect"]] * 5),
+                actions["payload_send"],
+                actions["communication"],
+            ]
+        ]
+    )
+
+    projection = project_executable_candidates(
+        state, requested, reserve_soc=0.5, comms_soc_floor=0.25
+    )
+    terminal = projection.terminal_states[0]
+
+    np.testing.assert_array_equal(projection.sequences, requested)
+    assert projection.repair_counts[0] == 0
+    assert terminal["total_detections"] == 1
+    assert terminal["jetson_raw_mb"] == pytest.approx(0.0)
+    assert terminal["jetson_compressed_mb"] == pytest.approx(0.0)
+    assert terminal["obc_data_mb"] == pytest.approx(0.0)
+    assert terminal["data_downlinked_mb"] > 1.8
+    attributes = analytical_candidate_attributes(
+        projection,
+        ("science_progress", "detection_progress", "downlink_progress"),
+    )
+    assert attributes[0, 0] == 0.0
+    assert attributes[0, 1] == 1.0
+    assert attributes[0, 2] > 1.8
+
+
+def test_projection_repairs_invalid_future_actions_and_propagates_battery() -> None:
+    observe = EVENTSAT_ACTIONS.index("payload_observe")
+    send = EVENTSAT_ACTIONS.index("payload_send")
+    charging = EVENTSAT_ACTIONS.index("charging")
+    state = _state(
+        battery_soc=0.51,
+        planning_sunlight=[False, False],
+        planning_power={
+            "consumption": {
+                name: {"sun_w": 100.0, "eclipse_w": 100.0} for name in EVENTSAT_ACTIONS
+            },
+            "generation_peak_w": 0.0,
+            "panel_efficiency_factor": 0.0,
+            "battery_capacity_wh": 70.0,
+            "charge_efficiency": 0.9,
+        },
+    )
+    requested = np.asarray([[observe, observe], [send, send]])
+
+    projection = project_executable_candidates(
+        state, requested, reserve_soc=0.5, comms_soc_floor=0.25
+    )
+
+    np.testing.assert_array_equal(projection.sequences[0], [observe, charging])
+    np.testing.assert_array_equal(projection.sequences[1], [charging, charging])
+    np.testing.assert_array_equal(projection.repair_counts, [1, 2])

@@ -131,5 +131,5 @@ never reconstructed by board code.
    [arXiv:2309.02427](https://arxiv.org/abs/2309.02427)
 5. D. Hafner et al., “Mastering Diverse Domains through World Models,” 2023.
    [arXiv:2301.04104](https://arxiv.org/abs/2301.04104)
-6. “LeWorldModel: A Generalized World Model for Video Generation,” 2026.
+6. “LeWorldModel: Stable End-to-End Joint-Embedding Predictive Architecture from Pixels,” 2026.
    [arXiv:2603.19312](https://arxiv.org/abs/2603.19312)

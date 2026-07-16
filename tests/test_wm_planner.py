@@ -9,7 +9,7 @@ import pytest
 
 from autops.core.plugin import create_representation, registered_plugins
 from autops.core.types import DecisionContext
-from autops.representations.wm_planner import EventSatLeWMCEM
+from autops.representations.wm_planner import EventSatAnalyticalCEM, EventSatLeWMCEM
 from autops.wm.artifact import (
     ModelContract,
     NormalizationContract,
@@ -112,6 +112,7 @@ def _planner(
 
 def test_plugin_registers_for_eventsat_onboard() -> None:
     plugins = registered_plugins("eventsat")
+    assert plugins[("eventsat", "analytical-cem", "onboard")] is EventSatAnalyticalCEM
     assert plugins[("eventsat", "lewm-cem", "onboard")] is EventSatLeWMCEM
 
     representation = create_representation(
@@ -124,6 +125,44 @@ def test_plugin_registers_for_eventsat_onboard() -> None:
         },
     )
     assert isinstance(representation, EventSatLeWMCEM)
+
+
+def test_analytical_cem_scores_exact_projected_attributes_without_torch() -> None:
+    planner = EventSatAnalyticalCEM(
+        {
+            "artifact": _artifact(plan_hold=1),
+            "lightweight_shaping": False,
+            "reserve_soc": 0.5,
+            "comms_soc_floor": 0.25,
+        }
+    )
+    charging = EVENTSAT_ACTIONS.index("charging")
+    observe = EVENTSAT_ACTIONS.index("payload_observe")
+    sequences = np.asarray([[charging], [observe]], dtype=np.int64)
+    state = _state(
+        total_observation_s=0.0,
+        observation_size_mb=9.41,
+        jetson_capacity_mb=100.0,
+        step_duration_s=60.0,
+        planning_contact_seconds=[0.0],
+        planning_sunlight=[True],
+    )
+
+    scores = planner._score_candidates({"state": state}, sequences)
+
+    assert scores[1] > scores[0]
+    assert planner.diagnostics()["uses_checkpoint"] is False
+    assert planner.diagnostics()["propagation_model"] == "orbit-almanac+eventsat-physics"
+
+
+def test_analytical_cem_rejects_injected_scorer() -> None:
+    with pytest.raises(ValueError, match="does not accept"):
+        EventSatAnalyticalCEM(
+            {
+                "artifact": _artifact(),
+                "rollout_scorer": lambda history, sequences: np.zeros(sequences.shape[0]),
+            }
+        )
 
 
 def test_plan_hold_reuses_actions_without_calling_rollout_scorer() -> None:

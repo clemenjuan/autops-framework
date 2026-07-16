@@ -130,7 +130,7 @@ class ExperimentRunner:
     ) -> dict[str, Any]:
         mean_metrics = statistics["mean"]
         experiment = self.spec.model_dump(mode="json")
-        if self.spec.onboard_token == "lewm-cem":
+        if self.spec.onboard_token in {"analytical-cem", "lewm-cem"}:
             identities = []
             for episode in episodes:
                 diagnostics = episode.get("decision_diagnostics", {}).get("onboard", {})
@@ -144,6 +144,9 @@ class ExperimentRunner:
                         "artifact_sha256": artifact.get("sha256"),
                         "trace_sha256": artifact.get("trace_sha256"),
                         "checkpoint_sha256": checkpoint.get("sha256"),
+                        "scorer_kind": diagnostics.get("scorer_kind"),
+                        "propagation_model": diagnostics.get("propagation_model"),
+                        "uses_checkpoint": diagnostics.get("uses_checkpoint"),
                     }
                 )
             if any(identity != identities[0] for identity in identities[1:]):

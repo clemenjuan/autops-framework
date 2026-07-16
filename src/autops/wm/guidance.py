@@ -466,15 +466,19 @@ def pipeline_scores(
     undeliverable_penalty: float,
     reserve_soc: float = 0.5,
     comms_soc_floor: float = 0.25,
+    projection: CandidateProjection | None = None,
 ) -> np.ndarray:
     """Score the exact projected byte-pipeline effects of one candidate bank."""
 
     scores = np.zeros(sequences.shape[0], dtype=np.float64)
     if sequences.shape[1] == 0:
         return scores
-    projection = project_executable_candidates(
-        state, sequences, reserve_soc=reserve_soc, comms_soc_floor=comms_soc_floor
-    )
+    if projection is None:
+        projection = project_executable_candidates(
+            state, sequences, reserve_soc=reserve_soc, comms_soc_floor=comms_soc_floor
+        )
+    elif not np.array_equal(projection.sequences, np.asarray(sequences)):
+        raise ValueError("pipeline score projection must match its executable candidate bank")
     downlink_scale = downlink_weight / reference_weight
     for sample, terminal in enumerate(projection.terminal_states):
         scores[sample] = _pipeline_score(

@@ -32,6 +32,7 @@ from autops.wm.cem import (
 )
 from autops.wm.compute import PlannerComputeEvidence
 from autops.wm.guidance import (
+    CandidateProjection,
     admissible_action_mask,
     guided_probabilities,
     pipeline_scores,
@@ -40,6 +41,7 @@ from autops.wm.guidance import (
 )
 from autops.wm.schema import EVENTSAT_ACTIONS, EVENTSAT_OBSERVATIONS
 from autops.wm.scoring import (
+    analytical_candidate_attributes,
     latent_candidate_attributes,
     scalarization_weights,
     validate_planner_checkpoint,
@@ -57,7 +59,7 @@ def _configured_artifact(config: Mapping[str, Any]) -> tuple[PlannerArtifact, Pa
             raise TypeError("artifact must be a validated PlannerArtifact")
         return injected, artifact_path
     if artifact_path is None:
-        raise ValueError("lewm-cem requires artifact or artifact_path")
+        raise ValueError("EventSat CEM requires artifact or artifact_path")
     return load_artifact(artifact_path), artifact_path
 
 
@@ -86,6 +88,10 @@ def _number(state: Mapping[str, Any], key: str, default: float = 0.0) -> float:
 @register("lewm-cem", mission="eventsat", role="onboard")
 class EventSatLeWMCEM(Representation):
     """Thin closed-loop adapter around the canonical artifact and CEM core."""
+
+    scorer_kind = "latent-terminal-affine"
+    propagation_model = "lewm-recursive-rollout"
+    uses_checkpoint = True
 
     observation_space = SpaceSpec((25,), "float32", -1.0, 1.0)
     action_space = SpaceSpec((7,), "int64", 0, 1, MODES)
@@ -143,6 +149,8 @@ class EventSatLeWMCEM(Representation):
         self._action_history: list[np.ndarray] = []
         self._held_actions: list[int] = []
         self._previous_solution: np.ndarray | None = None
+        self._candidate_projection: CandidateProjection | None = None
+        self._candidate_projection_step: int | None = None
         self._last_plan: tuple[int, ...] = ()
         self._last_action = self._action_index["charging"]
         self._compute = PlannerComputeEvidence()
@@ -155,6 +163,9 @@ class EventSatLeWMCEM(Representation):
         return {
             **self._compute.to_dict(self.cem, self.artifact),
             "mission_mode": self._mission_mode,
+            "scorer_kind": self.scorer_kind,
+            "propagation_model": self.propagation_model,
+            "uses_checkpoint": self.uses_checkpoint,
         }
 
     def reset(self, seed: int | None = None) -> None:
@@ -164,6 +175,8 @@ class EventSatLeWMCEM(Representation):
         self._action_history.clear()
         self._held_actions.clear()
         self._previous_solution = None
+        self._candidate_projection = None
+        self._candidate_projection_step = None
         self._last_plan = ()
         self._last_action = self._action_index["charging"]
         self._compute.reset()
@@ -210,6 +223,8 @@ class EventSatLeWMCEM(Representation):
             return self._choose(repaired, planned=False, rationale=rationale)
 
         history = self._history(state)
+        self._candidate_projection = None
+        self._candidate_projection_step = None
 
         def score(sequences: np.ndarray) -> np.ndarray:
             return self._score_candidates(history, sequences)
@@ -327,7 +342,10 @@ class EventSatLeWMCEM(Representation):
         if not np.isfinite(output).all():
             raise ValueError("rollout_scorer returned a non-finite value")
         if self._lightweight_shaping:
-            output += self._lightweight_pipeline_scores(history["state"], sequences)
+            projection = self._candidate_projection_for(history["state"], sequences)
+            output += self._lightweight_pipeline_scores(
+                history["state"], sequences, projection=projection
+            )
         return output
 
     def _contact_guided_probabilities(
@@ -346,16 +364,41 @@ class EventSatLeWMCEM(Representation):
         return seed_pipeline_candidate(state, sequences, first_action_mask=first_mask)
 
     def _project_candidates(self, state: Mapping[str, Any], sequences: np.ndarray) -> np.ndarray:
-        projection = project_executable_candidates(
+        self._candidate_projection = project_executable_candidates(
             state,
             sequences,
             reserve_soc=self._reserve_soc,
             comms_soc_floor=self._comms_soc_floor,
         )
-        return projection.sequences
+        self._candidate_projection_step = int(_number(state, "timestep", -1))
+        return self._candidate_projection.sequences
+
+    def _candidate_projection_for(
+        self, state: Mapping[str, Any], sequences: np.ndarray
+    ) -> CandidateProjection:
+        projection = self._candidate_projection
+        timestep = int(_number(state, "timestep", -1))
+        if (
+            projection is None
+            or self._candidate_projection_step != timestep
+            or not np.array_equal(projection.sequences, sequences)
+        ):
+            projection = project_executable_candidates(
+                state,
+                sequences,
+                reserve_soc=self._reserve_soc,
+                comms_soc_floor=self._comms_soc_floor,
+            )
+            self._candidate_projection = projection
+            self._candidate_projection_step = timestep
+        return projection
 
     def _lightweight_pipeline_scores(
-        self, state: Mapping[str, Any], sequences: np.ndarray
+        self,
+        state: Mapping[str, Any],
+        sequences: np.ndarray,
+        *,
+        projection: CandidateProjection | None = None,
     ) -> np.ndarray:
         return pipeline_scores(
             state,
@@ -367,6 +410,7 @@ class EventSatLeWMCEM(Representation):
             undeliverable_penalty=self._undeliverable_capacity_penalty,
             reserve_soc=self._reserve_soc,
             comms_soc_floor=self._comms_soc_floor,
+            projection=projection,
         )
 
     def _torch_attributes(self, history: Mapping[str, Any], sequences: np.ndarray) -> np.ndarray:
@@ -442,4 +486,33 @@ class EventSatLeWMCEM(Representation):
         return {"eventsat_0": action}
 
 
-__all__ = ["EventSatLeWMCEM", "RolloutScorer"]
+@register("analytical-cem", mission="eventsat", role="onboard")
+class EventSatAnalyticalCEM(EventSatLeWMCEM):
+    """CEM with exact EventSat propagation over the orbit-derived almanac."""
+
+    scorer_kind = "analytical-terminal"
+    propagation_model = "orbit-almanac+eventsat-physics"
+    uses_checkpoint = False
+
+    def __init__(self, config: dict[str, Any] | None = None) -> None:
+        super().__init__(config)
+        if self._injected_scorer is not None:
+            raise ValueError("analytical-cem does not accept an injected rollout scorer")
+
+    def _score_candidates(
+        self, history: Mapping[str, Any], sequences: np.ndarray
+    ) -> np.ndarray:
+        state = history["state"]
+        projection = self._candidate_projection_for(state, sequences)
+        attributes = analytical_candidate_attributes(
+            projection, self.artifact.probe.attribute_names
+        )
+        scores = attributes.astype(np.float64) @ self._weights.astype(np.float64)
+        if self._lightweight_shaping:
+            scores += self._lightweight_pipeline_scores(
+                state, sequences, projection=projection
+            )
+        return scores
+
+
+__all__ = ["EventSatAnalyticalCEM", "EventSatLeWMCEM", "RolloutScorer"]

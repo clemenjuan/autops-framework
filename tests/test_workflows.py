@@ -12,6 +12,7 @@ from autops.wm.schema import load_trace, trace_sha256
 def test_matrix_sweep_expands_runtime_cells_without_reserved_rl() -> None:
     coordinates = matrix_coordinates("eventsat")
     assert "eventsat/sas/ag/symb" in coordinates
+    assert "eventsat/sas/ao/analytical-cem" in coordinates
     assert "eventsat/sas/ao/lewm-cem" in coordinates
     assert "eventsat/sas/ah/lewm-cem/hllm-a" in coordinates
     assert not any("/rl" in coordinate or "/hrl" in coordinate for coordinate in coordinates)

@@ -13,7 +13,7 @@ functions.
 | Axis | Tokens | Meaning |
 |---|---|---|
 | Organisation | `sas`, `cmas`, `dmas`, `hmas`, `imas` | single agent; centralised, decentralised, hierarchical, or independent multi-agent scheduling |
-| Representation | `symb`, `llm-s`, `llm-a`, `hllm-s`, `hllm-a`, `lewm-cem` | rules; LLM single-shot/agentic; symbolically shielded LLM; learned latent model with CEM MPC |
+| Representation | `symb`, `llm-s`, `llm-a`, `hllm-s`, `hllm-a`, `analytical-cem`, `lewm-cem` | rules; LLM single-shot/agentic; symbolically shielded LLM; analytical or learned latent CEM MPC |
 | Paradigm | `conventional`, `ag`, `ao`, `ah` | conventional ground, autonomous ground, autonomous onboard, or dual-core hybrid authority |
 
 The LLM distinction is operational rather than rhetorical: `llm-s` makes one bounded
@@ -26,6 +26,12 @@ response but pass it through deterministic mission grounding and safety constrai
 predicts action-conditioned latent futures, decodes audited attributes through affine
 probes, and performs categorical cross-entropy-method search. Learned world-model
 planning is motivated by Hafner et al. [5] and the LeWorldModel formulation [6].
+
+`analytical-cem` is its matched model-based reference. It uses the same CEM,
+candidate projection, scalarisation, guidance, plan-hold, and safety controls, but
+scores terminal attributes from the exact EventSat transitions. Contact and sunlight
+lookahead come from the environment's active orbit backend, so Orekit propagation is
+computed once as the authoritative almanac rather than duplicated per candidate.
 
 `rl` and `hrl` are reserved names, with `implemented: false` in `matrix.yaml`. They
 cannot be expanded or run. A future PPO/RLlib contribution can implement the common
@@ -48,12 +54,12 @@ The canonical total is `1 + 7 + 3 + (3 × 7) = 32`. Runtime applicability is nar
 
 - `conventional`: ground `symb`;
 - `ag`: ground `symb`, `llm-s`, `llm-a`, `hllm-s`, or `hllm-a`;
-- `ao`: onboard `symb` or `lewm-cem`;
+- `ao`: onboard `symb`, `analytical-cem`, or `lewm-cem`;
 - `ah`: onboard `symb` or `lewm-cem`, paired with any runnable AG ground representation.
 
-The learned representation extends the current runnable study but does not alter the
-historical 32-cell definition. EventSat uses `sas`; SSA exercises all five organisation
-tokens with the symbolic AO representation at constellation sizes 20 and 100.
+The two CEM references extend the current runnable study but do not alter the historical
+32-cell definition. EventSat uses `sas`; SSA exercises all five organisation tokens
+with the symbolic AO representation at constellation sizes 20 and 100.
 
 Coordinates are expanded at runtime from `configs/matrix.yaml` and one mission file:
 

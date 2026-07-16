@@ -44,6 +44,11 @@ representations:
     action_space: receding-horizon
     shield: true
     implemented: true
+  analytical-cem:
+    substrate: analytical-model
+    action_space: receding-horizon
+    shield: true
+    implemented: true
 
 # The canonical EventSat design remains 32 cells. rl/hrl names are reserved so
 # the later RLlib port can land without changing any coordinate.
@@ -67,7 +72,7 @@ missions:
       ag:
         ground: [symb, llm-s, llm-a, hllm-s, hllm-a]
       ao:
-        onboard: [symb, lewm-cem]
+        onboard: [symb, analytical-cem, lewm-cem]
       ah:
         onboard: [symb, lewm-cem]
         ground: [symb, llm-s, llm-a, hllm-s, hllm-a]

@@ -42,3 +42,24 @@ def test_result_rejects_inconsistent_episode_artifacts() -> None:
         assert "inconsistent planner artifacts" in str(exc)
     else:
         raise AssertionError("inconsistent LeWM artifact identities were accepted")
+
+
+def test_analytical_result_binds_scorer_and_planner_artifact() -> None:
+    spec = expand_coordinate("eventsat/sas/ao/analytical-cem")
+    runner = ExperimentRunner(spec, save=False, prefer_orekit=False)
+    episode = _episode("a" * 64)
+    diagnostics = episode["decision_diagnostics"]["onboard"]
+    diagnostics.update(
+        {
+            "scorer_kind": "analytical-terminal",
+            "propagation_model": "orbit-almanac+eventsat-physics",
+            "uses_checkpoint": False,
+        }
+    )
+
+    result = runner._result_document([episode], {"mean": {}, "std": {}})
+    identity = result["experiment"]["planner_artifact_identity"]
+
+    assert identity["scorer_kind"] == "analytical-terminal"
+    assert identity["uses_checkpoint"] is False
+    assert result["experiment"]["representation"] == "analytical-cem"

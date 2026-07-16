@@ -199,7 +199,7 @@ class ExperimentSpec(BaseModel):
 
     @property
     def onboard_uses_jetson(self) -> bool:
-        return self.onboard_token in {"rl", "hrl", "lewm-cem"}
+        return self.onboard_token in {"rl", "hrl", "analytical-cem", "lewm-cem"}
 
 
 def _validate_coordinate(coord: Coordinate, matrix: dict[str, Any]) -> None:

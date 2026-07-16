@@ -15,7 +15,7 @@ from autops.wm.artifact import (
     ProbeEvidenceContract,
 )
 from autops.wm.cem import CEMConfig
-from autops.wm.guidance import project_executable_candidates
+from autops.wm.guidance import pipeline_scores, project_executable_candidates
 from autops.wm.schema import EVENTSAT_ACTIONS, EVENTSAT_OBSERVATIONS
 from autops.wm.scoring import analytical_candidate_attributes
 
@@ -313,3 +313,27 @@ def test_projection_repairs_invalid_future_actions_and_propagates_battery() -> N
     np.testing.assert_array_equal(projection.sequences[0], [observe, charging])
     np.testing.assert_array_equal(projection.sequences[1], [charging, charging])
     np.testing.assert_array_equal(projection.repair_counts, [1, 2])
+
+
+def test_pipeline_score_rejects_a_projection_from_another_candidate_bank() -> None:
+    charging = EVENTSAT_ACTIONS.index("charging")
+    observe = EVENTSAT_ACTIONS.index("payload_observe")
+    state = _state()
+    projection = project_executable_candidates(
+        state,
+        np.asarray([[charging]], dtype=np.int64),
+        reserve_soc=0.5,
+        comms_soc_floor=0.25,
+    )
+
+    with pytest.raises(ValueError, match="must match"):
+        pipeline_scores(
+            state,
+            np.asarray([[observe]], dtype=np.int64),
+            downlink_weight=1.0,
+            downlink_reward=1.0,
+            pass_stage_reward=0.0,
+            reference_weight=1.0,
+            undeliverable_penalty=0.0,
+            projection=projection,
+        )

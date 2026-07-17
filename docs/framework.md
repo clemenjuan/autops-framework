@@ -140,9 +140,10 @@ never reconstructed by board code.
    [arXiv:2301.04104](https://arxiv.org/abs/2301.04104)
 6. “LeWorldModel: Stable End-to-End Joint-Embedding Predictive Architecture from Pixels,” 2026.
    [arXiv:2603.19312](https://arxiv.org/abs/2603.19312)
-7. R. Y. Rubinstein, “Optimization of Computer Simulation Models with Rare Events,”
-   European Journal of Operational Research, 99:89–112, 1997.
-   [doi:10.1016/S0377-2217(96)00385-2](https://doi.org/10.1016/S0377-2217(96)00385-2)
+7. R. Y. Rubinstein and D. P. Kroese, *The Cross-Entropy Method: A Unified Approach
+   to Combinatorial Optimization, Monte-Carlo Simulation and Machine Learning*,
+   Springer, 2004.
+   [doi:10.1007/978-1-4757-4321-0](https://doi.org/10.1007/978-1-4757-4321-0)
 8. H. Bharadhwaj, K. Xie, and F. Shkurti, “Model-Predictive Control via Cross-Entropy
    and Gradient-Based Optimization,” L4DC, 2020.
    [paper](https://people.eecs.berkeley.edu/~brecht/l4dc2020/papers/bharadhwaj20.pdf)

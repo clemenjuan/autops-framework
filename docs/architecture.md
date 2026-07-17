@@ -175,9 +175,10 @@ Tracked source and public documentation contain no service endpoint or credentia
    [doi:10.1109/AERO53065.2022.9843352](https://doi.org/10.1109/AERO53065.2022.9843352)
 2. D. Hafner et al., “Mastering Diverse Domains through World Models,” 2023.
    [arXiv:2301.04104](https://arxiv.org/abs/2301.04104)
-3. R. Y. Rubinstein, “Optimization of Computer Simulation Models with Rare Events,”
-   European Journal of Operational Research, 99:89–112, 1997.
-   [doi:10.1016/S0377-2217(96)00385-2](https://doi.org/10.1016/S0377-2217(96)00385-2)
+3. R. Y. Rubinstein and D. P. Kroese, *The Cross-Entropy Method: A Unified Approach
+   to Combinatorial Optimization, Monte-Carlo Simulation and Machine Learning*,
+   Springer, 2004.
+   [doi:10.1007/978-1-4757-4321-0](https://doi.org/10.1007/978-1-4757-4321-0)
 4. H. Bharadhwaj, K. Xie, and F. Shkurti, “Model-Predictive Control via Cross-Entropy
    and Gradient-Based Optimization,” L4DC, 2020.
    [paper](https://people.eecs.berkeley.edu/~brecht/l4dc2020/papers/bharadhwaj20.pdf)

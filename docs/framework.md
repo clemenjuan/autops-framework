@@ -27,9 +27,10 @@ predicts action-conditioned latent futures, decodes audited attributes through a
 probes, and performs categorical cross-entropy-method search. Learned world-model
 planning is motivated by Hafner et al. [5] and the LeWorldModel formulation [6].
 
-`analytical-cem` is its matched model-based reference. It uses the same CEM,
-candidate projection, scalarisation, guidance, plan-hold, and safety controls, but
-scores terminal attributes from the exact EventSat transitions. Contact and sunlight
+`analytical-cem` is its matched model-based reference, in the sampling-based
+CEM-MPC tradition [7, 8, 9]. It uses the same CEM, candidate projection,
+scalarisation, guidance, plan-hold, and safety controls, but scores terminal
+attributes from the exact EventSat transitions. Contact and sunlight
 lookahead come from the environment's active orbit backend, so Orekit propagation is
 computed once as the authoritative almanac rather than duplicated per candidate.
 
@@ -139,3 +140,11 @@ never reconstructed by board code.
    [arXiv:2301.04104](https://arxiv.org/abs/2301.04104)
 6. “LeWorldModel: Stable End-to-End Joint-Embedding Predictive Architecture from Pixels,” 2026.
    [arXiv:2603.19312](https://arxiv.org/abs/2603.19312)
+7. R. Y. Rubinstein, “Optimization of Computer Simulation Models with Rare Events,”
+   European Journal of Operational Research, 99:89–112, 1997.
+   [doi:10.1016/S0377-2217(96)00385-2](https://doi.org/10.1016/S0377-2217(96)00385-2)
+8. H. Bharadhwaj, K. Xie, and F. Shkurti, “Model-Predictive Control via Cross-Entropy
+   and Gradient-Based Optimization,” L4DC, 2020.
+   [paper](https://people.eecs.berkeley.edu/~brecht/l4dc2020/papers/bharadhwaj20.pdf)
+9. B. Amos and D. Yarats, “The Differentiable Cross-Entropy Method,” ICML, 2020.
+   [PMLR v119](https://proceedings.mlr.press/v119/amos20a/amos20a.pdf)

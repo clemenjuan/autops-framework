@@ -1,10 +1,17 @@
-# Jetson planner evidence
+# Preliminary Jetson AGX planner evidence
 
 This page separates compute evidence from mission-effect evidence. The matched Jetson
 benchmark is candidate Paper A evidence for planner latency, throughput, rail energy,
 memory, and thermal behaviour. Paper B utility and M-01…M-14 remain result-document
 metrics selected by `configs/papers/paper_b.yaml`; no utility row is inferred from a
 hardware benchmark or a one-call smoke test.
+
+These are preliminary engineering measurements from a Jetson AGX Orin Developer Kit,
+not measurements of EventSat's intended Jetson Orin Nano. The deployed models are
+expected to run on the Orin Nano, but latency, rail power, memory pressure, and thermal
+behaviour must be measured again on the mission-target board before paper approval.
+Nothing in the tables below should be presented as Orin Nano performance or as
+flight-representative evidence.
 
 ## Matched CEM benchmark
 
@@ -53,6 +60,7 @@ comparison.
 | Item | Identity |
 |---|---|
 | Source revision | `de3c13fca6ab5f39cda5495e346a5f88ea6d23ec` (clean) |
+| Measurement platform | Jetson AGX Orin Developer Kit (preliminary) |
 | Aggregate manifest SHA-256 | `bebc821291151cbd5b25acf3fbf7b8f804b0598eb44155b5f23dd65c4b60874f` |
 | Aggregate summary SHA-256 | `0c89d59407501121d1618f3fce5ddfd85602315ee4223f5b4991742d6658b66a` |
 | Harness SHA-256 | `5bbc61b5eebde37a7a87ed52fab23cdd48eb86784f8680fb8c747efec2f40fa2` |

@@ -153,6 +153,7 @@ class CandidateProjection:
     sequences: np.ndarray
     terminal_states: tuple[dict[str, Any], ...]
     repair_counts: np.ndarray
+    terminal_forced: np.ndarray
 
 
 def _transition_parameters(state: Mapping[str, Any]) -> PipelineParameters:
@@ -292,6 +293,7 @@ def project_executable_candidates(
     settling = max(0, int(_number(state, "settling_time_steps")))
     projected = requested.astype(np.int64, copy=True)
     repairs = np.zeros(requested.shape[0], dtype=np.int64)
+    forced = np.zeros(requested.shape[0], dtype=bool)
     terminal: list[dict[str, Any]] = []
     for sample, row in enumerate(requested):
         simulation = dict(state)
@@ -310,10 +312,11 @@ def project_executable_candidates(
                 repairs[sample] += 1
             projected[sample, offset] = action
             effective = _resolved_action(simulation, action, settling)
+            forced[sample] = effective != int(requested_value)
             _apply_projected_action(simulation, effective, parameters, float(contacts_s[offset]))
             _advance_battery(simulation, effective, bool(sunlight[offset]))
         terminal.append(simulation)
-    return CandidateProjection(projected, tuple(terminal), repairs)
+    return CandidateProjection(projected, tuple(terminal), repairs, forced)
 
 
 def guided_probabilities(
@@ -477,7 +480,9 @@ def pipeline_scores(
         projection = project_executable_candidates(
             state, sequences, reserve_soc=reserve_soc, comms_soc_floor=comms_soc_floor
         )
-    elif not np.array_equal(projection.sequences, np.asarray(sequences)):
+    elif projection.sequences is not sequences and not np.array_equal(
+        projection.sequences, np.asarray(sequences)
+    ):
         raise ValueError("pipeline score projection must match its executable candidate bank")
     downlink_scale = downlink_weight / reference_weight
     for sample, terminal in enumerate(projection.terminal_states):

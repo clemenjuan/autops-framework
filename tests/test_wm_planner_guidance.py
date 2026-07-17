@@ -132,7 +132,9 @@ def test_lightweight_score_credits_only_pipeline_feasible_downlink() -> None:
     )
     sequences = np.asarray([[send, communication], [communication, communication]])
 
-    scores = planner._lightweight_pipeline_scores(state, sequences)
+    scores = planner._lightweight_pipeline_scores(
+        state, planner._project_executable(state, sequences)
+    )
 
     assert scores[0] > 0.0
     assert scores[1] == pytest.approx(0.0)
@@ -313,6 +315,33 @@ def test_projection_repairs_invalid_future_actions_and_propagates_battery() -> N
     np.testing.assert_array_equal(projection.sequences[0], [observe, charging])
     np.testing.assert_array_equal(projection.sequences[1], [charging, charging])
     np.testing.assert_array_equal(projection.repair_counts, [1, 2])
+
+
+def test_terminal_forced_flags_only_terminal_step_repairs() -> None:
+    observe = EVENTSAT_ACTIONS.index("payload_observe")
+    send = EVENTSAT_ACTIONS.index("payload_send")
+    charging = EVENTSAT_ACTIONS.index("charging")
+    state = _state(
+        battery_soc=0.51,
+        planning_sunlight=[False, False],
+        planning_power={
+            "consumption": {
+                name: {"sun_w": 100.0, "eclipse_w": 100.0} for name in EVENTSAT_ACTIONS
+            },
+            "generation_peak_w": 0.0,
+            "panel_efficiency_factor": 0.0,
+            "battery_capacity_wh": 70.0,
+            "charge_efficiency": 0.9,
+        },
+    )
+    requested = np.asarray([[observe, observe], [send, charging]])
+
+    projection = project_executable_candidates(
+        state, requested, reserve_soc=0.5, comms_soc_floor=0.25
+    )
+
+    np.testing.assert_array_equal(projection.repair_counts, [1, 1])
+    np.testing.assert_array_equal(projection.terminal_forced, [True, False])
 
 
 def test_pipeline_score_rejects_a_projection_from_another_candidate_bank() -> None:

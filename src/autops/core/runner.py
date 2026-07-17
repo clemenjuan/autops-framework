@@ -137,7 +137,7 @@ class ExperimentRunner:
                 artifact = diagnostics.get("artifact_identity")
                 checkpoint = diagnostics.get("checkpoint_identity")
                 if not isinstance(artifact, dict) or not isinstance(checkpoint, dict):
-                    raise ValueError("LeWM result lacks planner artifact identity")
+                    raise ValueError("CEM planner result lacks planner artifact identity")
                 identities.append(
                     {
                         "schema_version": artifact.get("schema_version"),
@@ -150,7 +150,7 @@ class ExperimentRunner:
                     }
                 )
             if any(identity != identities[0] for identity in identities[1:]):
-                raise ValueError("LeWM episodes used inconsistent planner artifacts")
+                raise ValueError("CEM planner episodes used inconsistent planner artifacts")
             experiment["planner_artifact_identity"] = identities[0]
         result = {
             "schema_version": 1,

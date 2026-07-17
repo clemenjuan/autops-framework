@@ -9,7 +9,8 @@ import pytest
 
 from autops.core.plugin import create_representation, registered_plugins
 from autops.core.types import DecisionContext
-from autops.representations.wm_planner import EventSatAnalyticalCEM, EventSatLeWMCEM
+from autops.representations.analytical_planner import EventSatAnalyticalCEM
+from autops.representations.wm_planner import EventSatLeWMCEM
 from autops.wm.artifact import (
     ModelContract,
     NormalizationContract,
@@ -28,8 +29,11 @@ def _evidence(attributes: tuple[str, ...]) -> ProbeEvidenceContract:
     return ProbeEvidenceContract(attributes, zeros, normalized, normalized, (0,), (1,), 1e-3, 1)
 
 
-def _artifact(*, plan_hold: int = 3) -> PlannerArtifact:
-    attributes = ("science_progress", "downlink_progress")
+def _artifact(
+    *,
+    plan_hold: int = 3,
+    attributes: tuple[str, str] = ("science_progress", "downlink_progress"),
+) -> PlannerArtifact:
     return PlannerArtifact(
         model=ModelContract(
             checkpoint="weights/lewm.ckpt",
@@ -55,7 +59,7 @@ def _artifact(*, plan_hold: int = 3) -> PlannerArtifact:
             attribute_names=attributes,
             target_mean=(0.0, 0.0),
             target_std=(1.0, 100.0),
-            degenerate=("downlink_progress",),
+            degenerate=(attributes[1],),
         ),
         probe_evidence=_evidence(attributes),
         cem=CEMConfig(
@@ -163,6 +167,49 @@ def test_analytical_cem_rejects_injected_scorer() -> None:
                 "rollout_scorer": lambda history, sequences: np.zeros(sequences.shape[0]),
             }
         )
+
+
+def test_analytical_cem_rejects_unsupported_probe_attributes_at_construction() -> None:
+    artifact = _artifact(attributes=("science_progress", "thermal_margin"))
+
+    with pytest.raises(ValueError, match="cannot score probe attributes"):
+        EventSatAnalyticalCEM({"artifact": artifact})
+
+
+def test_analytical_cem_shaping_scores_the_repaired_executable_bank() -> None:
+    planner = EventSatAnalyticalCEM({"artifact": _artifact(plan_hold=1)})
+    observe = EVENTSAT_ACTIONS.index("payload_observe")
+    sequences = np.asarray([[observe]], dtype=np.int64)
+    state = _state(
+        battery_soc=0.30,
+        observation_size_mb=9.41,
+        jetson_capacity_mb=100.0,
+        step_duration_s=60.0,
+        planning_contact_seconds=[0.0],
+        planning_sunlight=[True],
+    )
+
+    assert planner._project_executable(state, sequences).repair_counts[0] == 1
+    assert np.isfinite(planner._score_candidates({"state": state}, sequences)).all()
+
+
+def test_injected_scorer_reports_injected_provenance() -> None:
+    planner = _planner(lambda history, sequences: np.zeros(sequences.shape[0]))
+    diagnostics = planner.diagnostics()
+
+    assert diagnostics["scorer_kind"] == "injected-rollout"
+    assert diagnostics["propagation_model"] == "injected-rollout"
+    assert diagnostics["uses_checkpoint"] is False
+
+
+def test_custom_mission_weights_configure_a_custom_mode() -> None:
+    planner = _planner(
+        lambda history, sequences: np.zeros(sequences.shape[0]),
+        mission_weights={"downlink_progress": 1.0},
+    )
+
+    assert planner.diagnostics()["mission_mode"] == "custom"
+    assert planner._mission_weights == {"science_progress": 0.0, "downlink_progress": 1.0}
 
 
 def test_plan_hold_reuses_actions_without_calling_rollout_scorer() -> None:
@@ -323,7 +370,7 @@ def test_checkpoint_load_rejects_artifact_semantic_mismatch(
 
 def test_compute_diagnostics_are_timed_resettable_and_identity_bound(monkeypatch) -> None:
     ticks = iter([10.0, 10.25, 20.0, 20.75])
-    monkeypatch.setattr("autops.representations.wm_planner.perf_counter", lambda: next(ticks))
+    monkeypatch.setattr("autops.representations.cem_planner.perf_counter", lambda: next(ticks))
 
     def payload_score(history: dict[str, Any], sequences: np.ndarray) -> np.ndarray:
         del history

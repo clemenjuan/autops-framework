@@ -40,7 +40,7 @@ def analytical_candidate_attributes(
         total_observation_s=column("total_observation_s"),
         total_detections=column("total_detections"),
         communication_opportunity=column("contact_window_seconds") > 0.0,
-        forced_mode_risk=projection.repair_counts > 0,
+        forced_mode_risk=projection.terminal_forced,
         health_nominal=np.asarray(
             [state.get("health_status", "nominal") == "nominal" for state in states]
         ),

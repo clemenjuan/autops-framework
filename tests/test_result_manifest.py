@@ -84,3 +84,10 @@ def test_canonical_paper_a_manifest_starts_with_no_approved_rows() -> None:
 
     assert manifest.paper_id == "paper-a-compute-aware-planning"
     assert manifest.approved == ()
+
+
+def test_canonical_paper_b_manifest_starts_with_no_approved_rows() -> None:
+    manifest = load_result_manifest(Path("configs/papers/paper_b.yaml"))
+
+    assert manifest.paper_id == "paper-b-operations-architecture-comparison"
+    assert manifest.approved == ()

@@ -38,6 +38,14 @@ independent onboard and ground cores with explicit promotion and arbitration. Th
 authority boundaries reflect the operational allocation problem described by Castano
 et al. [1], rather than treating autonomy as a single scalar level.
 
+Onboard LLM representations use the same AO boundary as other planners. A local model
+produces one immediate action and a bounded schedule, the adapter executes held actions
+for `plan_hold`, and only a new planning event invokes the model again. The hybrid LLM
+variants recheck every held action against fresh telemetry before execution; the mission
+environment still applies the final physical and safety resolution. Measured inference
+time is carried as `planner_active_s`, while the mission power model converts that time
+to incremental energy only in modes where the Jetson base load is otherwise absent.
+
 ## Package boundaries
 
 | Package | Owns | Must not own |
@@ -119,10 +127,12 @@ Planner compute uses an event model rather than a full-step surrogate:
 E_{event}=P_{active}t_{plan}+E_{boot}+P_{idle}t_{idle}.
 \]
 
-`planner_active_s` is measured around CEM execution. The power and boot/idle terms are
-declared under `power` in the mission configuration and are labelled `assumed` unless
-replaced by hardware evidence. Incremental planner energy is zero in modes whose base
-load already includes the Jetson.
+`planner_active_s` is measured around CEM or local LLM execution. The power and
+boot/idle terms are declared under `power` in the mission configuration and are labelled
+`assumed` unless replaced by hardware evidence. Incremental planner energy is zero in
+modes whose base load already includes the Jetson. Board-level INA3221 rails cannot
+replace the scalar model unless a non-overlapping total-input boundary is established;
+the current hardware results therefore retain every exposed rail separately.
 
 ## Commands and runtime data
 
@@ -147,10 +157,14 @@ then runs the deployed categorical CEM and shared latent scorer on deterministic
 from held-out episodes. Its portable JSON records plans, learned and realised scores,
 attribute calibration, aggregate evidence, and source/runtime provenance without input
 paths. `train audit` compares linear and nonlinear frozen-feature readouts. The paper-facing
-`board` reads only approved identities from `configs/papers/paper_a.yaml` and verifies the
-result ID, commit, configuration, and checkpoint hashes. Diagnostic entries remain
-preserved but excluded. Board generation fails closed on an empty approval list or on
-incomplete, non-finite, duplicate, mismatched, or provenance-free results.
+`board` reads only approved identities from the selected paper manifest (Paper B by
+default) and verifies the result ID, commit, configuration, and checkpoint hashes.
+Diagnostic entries remain preserved but excluded. Board generation fails closed on an
+empty approval list or on incomplete, non-finite, duplicate, mismatched, or
+provenance-free results. Mission utility and M-01…M-14 belong on that results board;
+hardware latency, rail energy, and thermal evidence use the separate, provenance-bearing
+[Jetson planner evidence](jetson-benchmark.md) table rather than inventing mission
+metrics.
 
 `train wm` also requires a W&B run. Tracking records optimizer/validation metrics,
 the public-safe model, data, and source contracts, and content-addressed dataset and

@@ -1,0 +1,7 @@
+schema_version: autops.paper-results-manifest/v1
+paper_id: paper-b-operations-architecture-comparison
+
+# M-01…M-14 utility results enter this manifest only after the paper gate passes.
+# Hardware diagnostics and single-call feasibility smokes are not board rows.
+approved_results: []
+diagnostic_results: []

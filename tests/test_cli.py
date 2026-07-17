@@ -20,6 +20,12 @@ def test_parser_exposes_all_five_commands() -> None:
         assert command in help_text
 
 
+def test_board_defaults_to_paper_b_mission_results() -> None:
+    args = parser().parse_args(["board"])
+
+    assert args.manifest == Path("configs/papers/paper_b.yaml")
+
+
 def test_sweep_dry_run_prints_real_coordinates(capsys) -> None:
     assert main(["sweep", "ssa", "--organisation", "imas", "--dry-run"]) == 0
     payload = json.loads(capsys.readouterr().out)

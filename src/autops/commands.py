@@ -126,7 +126,7 @@ def parser() -> argparse.ArgumentParser:
     board.add_argument(
         "--manifest",
         type=Path,
-        default=Path("configs/papers/paper_a.yaml"),
+        default=Path("configs/papers/paper_b.yaml"),
     )
     board.add_argument("--output", type=Path, default=Path("boards/index.html"))
     board.add_argument("--title", default="AUTOPS results")

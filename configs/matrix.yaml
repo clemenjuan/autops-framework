@@ -50,8 +50,9 @@ representations:
     shield: true
     implemented: true
 
-# The canonical EventSat design remains 32 cells. rl/hrl names are reserved so
-# the later RLlib port can land without changing any coordinate.
+# Historical 32-cell EventSat baseline. The runnable mission declaration below
+# adds six AO planners and five LeWM-AH pairings, so the union is currently 43
+# declared study cells, of which 23 are executable. rl/hrl remain reserved.
 canonical_eventsat_32:
   conventional:
     ground: [symb]

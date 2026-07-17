@@ -45,8 +45,12 @@ coordinate. AUTOPS ships no RL library, neural policy, or symbolic stand-in.
 
 ## EventSat matrix
 
-The canonical EventSat design contains 32 cells. The definition is retained even while
-the real RL cells are deferred:
+EventSat now has three distinct counts. The historical baseline remains the canonical
+32-cell design, the union of that baseline and the presently declared extensions has 43
+study cells, and 23 of those cells are executable today. Keeping these counts separate
+prevents reserved RL coordinates from being mistaken for implementations.
+
+The historical baseline is:
 
 | Paradigm | Onboard representations | Ground representations | Cells |
 |---|---|---|---:|
@@ -55,17 +59,32 @@ the real RL cells are deferred:
 | `ao` | `symb`, `rl`, `hrl` | — | 3 |
 | `ah` | `symb`, `rl`, `hrl` | the seven AG representations | 21 |
 
-The canonical total is `1 + 7 + 3 + (3 × 7) = 32`. Runtime applicability is narrower:
+The canonical total is `1 + 7 + 3 + (3 × 7) = 32`.
+
+| Extension beyond the historical baseline | Added cells |
+|---|---:|
+| AO onboard `llm-s`, `llm-a`, `hllm-s`, `hllm-a` | 4 |
+| AO onboard `analytical-cem`, `lewm-cem` | 2 |
+| AH onboard `lewm-cem` with the five runnable AG ground representations | 5 |
+
+The declared study total is therefore `32 + 4 + 2 + 5 = 43`. The executable subset is:
+
+| Paradigm | Runnable cells |
+|---|---:|
+| `conventional` | 1 |
+| `ag` | 5 |
+| `ao` | 7 |
+| `ah` | 10 |
+| **Total** | **23** |
 
 - `conventional`: ground `symb`;
 - `ag`: ground `symb`, `llm-s`, `llm-a`, `hllm-s`, or `hllm-a`;
 - `ao`: onboard `symb`, `llm-s`, `llm-a`, `hllm-s`, `hllm-a`, `analytical-cem`, or `lewm-cem`;
 - `ah`: onboard `symb` or `lewm-cem`, paired with any runnable AG ground representation.
 
-The two CEM references and the four AO LLM variants extend the current runnable study
-but do not alter the historical 32-cell definition. EventSat uses `sas`; SSA exercises
-all five organisation tokens with the symbolic AO representation at constellation sizes
-20 and 100.
+The 20 historical cells that contain a reserved `rl` or `hrl` token remain documented
+but do not run. EventSat uses `sas`; SSA exercises all five organisation tokens with the
+symbolic AO representation at constellation sizes 20 and 100.
 
 Coordinates are expanded at runtime from `configs/matrix.yaml` and one mission file:
 
@@ -117,6 +136,10 @@ reported for every metric; M-09 is computed across paired episodes.
 
 Every board row retains the sample count. Metrics are computed by the mission collector,
 never reconstructed by board code.
+
+Hardware timing, rail power, and thermal measurements are not M-01…M-14 mission
+metrics and therefore do not enter board columns. The current Jetson evidence and its
+run identities are reported separately in [Jetson planner evidence](jetson-benchmark.md).
 
 ## Fairness and reproducibility
 

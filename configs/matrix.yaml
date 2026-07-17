@@ -72,7 +72,7 @@ missions:
       ag:
         ground: [symb, llm-s, llm-a, hllm-s, hllm-a]
       ao:
-        onboard: [symb, analytical-cem, lewm-cem]
+        onboard: [symb, llm-s, llm-a, hllm-s, hllm-a, analytical-cem, lewm-cem]
       ah:
         onboard: [symb, lewm-cem]
         ground: [symb, llm-s, llm-a, hllm-s, hllm-a]

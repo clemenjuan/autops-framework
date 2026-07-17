@@ -1,8 +1,9 @@
-"""Single-shot and bounded-agentic EventSat ground-planner representations."""
+"""Single-shot and bounded-agentic EventSat schedule representations."""
 
 from __future__ import annotations
 
 import json
+from time import perf_counter
 from typing import Any, ClassVar
 
 from autops.core.plugin import Representation, register
@@ -15,8 +16,17 @@ from autops.llm.agentic_prompts import (
 )
 from autops.llm.client import LLMClient
 from autops.llm.llm_prompts import SCHEDULE_SYSTEM_PROMPT, format_schedule_prompt
+from autops.llm.onboard_prompts import (
+    ONBOARD_AGENTIC_SCHEDULE_SYSTEM_PROMPT,
+    ONBOARD_SCHEDULE_SYSTEM_PROMPT,
+    format_forced_onboard_schedule_prompt,
+    format_onboard_schedule_prompt,
+    format_onboard_tool_result_prompt,
+)
 from autops.llm.tools import execute_tool
 from autops.missions.eventsat.physics import MODES, encode_vectors
+from autops.paradigms.base import expand_schedule
+from autops.wm.cem import CEMConfig
 
 _VALID_MODES = frozenset(MODES)
 _OPERATIONAL_MODES = frozenset(
@@ -68,13 +78,15 @@ def _merge_schedule(blocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return merged
 
 
-class LLMGroundPlanner(Representation):
-    """Shared parser, substrate-integrity checks, and optional symbolic shield."""
+class LLMSchedulePlanner(Representation):
+    """Shared schedule parser, bounded LLM loop, and optional symbolic shield."""
 
     observation_space = SpaceSpec((25,), "float32", 0.0, 1.0)
     action_space = SpaceSpec((7,), "int64", 0, 1, MODES)
     symbolic_grounding: ClassVar[bool] = False
     agentic: ClassVar[bool] = False
+    role: ClassVar[str] = "ground"
+    allow_scheduled_communication: ClassVar[bool] = False
 
     def __init__(self, config: dict[str, Any] | None = None) -> None:
         super().__init__(config)
@@ -85,6 +97,11 @@ class LLMGroundPlanner(Representation):
         self.max_agentic_steps = max(1, int(self.config.get("max_agentic_steps", 3)))
         self._tool_calls = 0
         self._grounding_overrides = 0
+        self.plan_hold = max(1, int(self.config.get("plan_hold", CEMConfig().plan_hold)))
+        self._held_modes: list[str] = []
+        self._planning_events = 0
+        self._held_action_steps = 0
+        self._planning_latency_s = 0.0
 
     def encode_observation(self, observation: dict[str, Any]) -> dict[str, Any]:
         _, _, raw = encode_vectors(observation)
@@ -108,36 +125,67 @@ class LLMGroundPlanner(Representation):
     def select_action(self, context: DecisionContext) -> dict[str, Any]:
         state = context.state
         if not state:
-            raise RuntimeError("LLM ground planner received no EventSat state")
-        gap_steps = max(1, int(state.get("estimated_gap_steps", 92)))
+            raise RuntimeError(f"LLM {self.role} planner received no EventSat state")
+        if self.role == "onboard":
+            return self._select_onboard(state)
+        mode, schedule = self._plan(state, max(1, int(state.get("estimated_gap_steps", 92))))
+        return {"eventsat_0": {"mode": mode}, "schedule": schedule}
+
+    def _select_onboard(self, state: dict[str, Any]) -> dict[str, Any]:
+        if self._held_modes:
+            mode = self._held_modes.pop(0)
+            if self.symbolic_grounding:
+                mode = self._ground_held_mode(mode, state)
+            self._held_action_steps += 1
+            self._last_rationale = f"Executed held {self.__class__.__name__} action"
+            return self._onboard_action(mode, planned=False)
+
+        remaining_steps = max(0, self.plan_hold - 1)
+        started = perf_counter()
+        mode, schedule = self._plan(state, max(1, remaining_steps))
+        elapsed = max(0.0, perf_counter() - started)
+        self._held_modes = expand_schedule(schedule)[:remaining_steps]
+        self._planning_events += 1
+        self._planning_latency_s += elapsed
+        return self._onboard_action(mode, planned=True, planner_active_s=elapsed)
+
+    def _plan(self, state: dict[str, Any], schedule_steps: int) -> tuple[str, list[dict[str, Any]]]:
         errors: list[str] = []
         for _ in range(self.max_retries + 1):
             try:
                 payload, trace = (
-                    self._agentic_payload(state, gap_steps)
+                    self._agentic_payload(state, schedule_steps)
                     if self.agentic
-                    else self._single_shot_payload(state, gap_steps)
+                    else self._single_shot_payload(state, schedule_steps)
                 )
-                mode = self._contact_mode(payload, state)
-                schedule = self._schedule(payload.get("schedule"), gap_steps, state)
+                mode = self._immediate_mode(payload, state)
+                schedule = self._schedule(payload.get("schedule"), schedule_steps, state)
                 rationale = str(payload.get("rationale", "")).strip()
                 prefix = "Agentic" if self.agentic else "Single-shot"
-                self._last_rationale = f"{prefix} LLM ground plan{trace}: {rationale}"
-                return {"eventsat_0": {"mode": mode}, "schedule": schedule}
+                self._last_rationale = f"{prefix} LLM {self.role} plan{trace}: {rationale}"
+                return mode, schedule
             except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
                 errors.append(f"{type(exc).__name__}: {exc}")
         detail = errors[-1] if errors else "no valid decision"
         raise RuntimeError(
-            "LLM substrate integrity violation: no valid contact mode and schedule "
+            "LLM substrate integrity violation: no valid immediate mode and schedule "
             f"after {self.max_retries + 1} attempts ({detail})"
         )
 
     def _single_shot_payload(
         self, state: dict[str, Any], gap_steps: int
     ) -> tuple[dict[str, Any], str]:
+        system_prompt = (
+            ONBOARD_SCHEDULE_SYSTEM_PROMPT if self.role == "onboard" else SCHEDULE_SYSTEM_PROMPT
+        )
+        user_prompt = (
+            format_onboard_schedule_prompt(state, gap_steps)
+            if self.role == "onboard"
+            else format_schedule_prompt(state, gap_steps)
+        )
         raw = self.client.generate(
-            SCHEDULE_SYSTEM_PROMPT,
-            format_schedule_prompt(state, gap_steps),
+            system_prompt,
+            user_prompt,
             json_mode=True,
         )
         parsed = _decision(_json_object(raw))
@@ -147,9 +195,19 @@ class LLMGroundPlanner(Representation):
 
     def _agentic_payload(self, state: dict[str, Any], gap_steps: int) -> tuple[dict[str, Any], str]:
         context: list[dict[str, Any]] = []
+        system_prompt = (
+            ONBOARD_AGENTIC_SCHEDULE_SYSTEM_PROMPT
+            if self.role == "onboard"
+            else AGENTIC_SCHEDULE_SYSTEM_PROMPT
+        )
+        user_prompt = (
+            format_onboard_schedule_prompt(state, gap_steps)
+            if self.role == "onboard"
+            else format_schedule_planning_prompt(state, gap_steps)
+        )
         raw = self.client.generate(
-            AGENTIC_SCHEDULE_SYSTEM_PROMPT,
-            format_schedule_planning_prompt(state, gap_steps),
+            system_prompt,
+            user_prompt,
             json_mode=True,
         )
         parsed = _json_object(raw)
@@ -166,9 +224,14 @@ class LLMGroundPlanner(Representation):
             result = execute_tool(name, args, state)
             self._tool_calls += 1
             context.append({"step": "tool", "name": name, "result": result})
+            user_prompt = (
+                format_onboard_tool_result_prompt(name, result, context, gap_steps)
+                if self.role == "onboard"
+                else format_schedule_tool_result_prompt(name, result, context, gap_steps)
+            )
             raw = self.client.generate(
-                AGENTIC_SCHEDULE_SYSTEM_PROMPT,
-                format_schedule_tool_result_prompt(name, result, context, gap_steps),
+                system_prompt,
+                user_prompt,
                 json_mode=True,
             )
             parsed = _json_object(raw)
@@ -178,9 +241,14 @@ class LLMGroundPlanner(Representation):
             tool_call = parsed.get("tool_call")
 
         if decision is None:
+            user_prompt = (
+                format_forced_onboard_schedule_prompt(gap_steps)
+                if self.role == "onboard"
+                else format_forced_schedule_prompt(context, gap_steps)
+            )
             raw = self.client.generate(
-                AGENTIC_SCHEDULE_SYSTEM_PROMPT,
-                format_forced_schedule_prompt(context, gap_steps),
+                system_prompt,
+                user_prompt,
                 json_mode=True,
             )
             decision = _decision(_json_object(raw))
@@ -190,7 +258,7 @@ class LLMGroundPlanner(Representation):
         trace = f" via tools [{', '.join(names)}]" if names else ""
         return decision, trace
 
-    def _contact_mode(self, payload: dict[str, Any], state: dict[str, Any]) -> str:
+    def _immediate_mode(self, payload: dict[str, Any], state: dict[str, Any]) -> str:
         mode = payload.get("mode", payload.get("pass_mode"))
         if mode not in _VALID_MODES:
             raise ValueError(f"invalid contact mode {mode!r}")
@@ -214,7 +282,11 @@ class LLMGroundPlanner(Representation):
             raise TypeError("schedule must be a list")
         blocks: list[dict[str, Any]] = []
         total = 0
-        allowed = _VALID_MODES - {"communication"} if self.symbolic_grounding else _VALID_MODES
+        allowed = (
+            _VALID_MODES - {"communication"}
+            if self.symbolic_grounding and not self.allow_scheduled_communication
+            else _VALID_MODES
+        )
         for entry in raw:
             if isinstance(entry, (list, tuple)) and len(entry) >= 2:
                 mode, duration = entry[0], entry[1]
@@ -262,42 +334,113 @@ class LLMGroundPlanner(Representation):
             shielded.append({"mode": mode, "steps": block["steps"]})
         return _merge_schedule(shielded)
 
+    def _ground_held_mode(self, mode: str, state: dict[str, Any]) -> str:
+        """Apply the current-state symbolic guard before executing a held action."""
+
+        immediate = self._immediate_mode({"mode": mode}, state)
+        return str(self._shield([{"mode": immediate, "steps": 1}], state)[0]["mode"])
+
     def diagnostics(self) -> dict[str, Any]:
-        return {
+        diagnostics = {
             **self.client.metrics(),
             "agentic_tool_calls": float(self._tool_calls),
             "grounding_overrides": float(self._grounding_overrides),
             "llm_provenance": self.client.provenance(),
         }
+        if self.role == "onboard":
+            diagnostics.update(
+                {
+                    "plan_hold": self.plan_hold,
+                    "planning_events": self._planning_events,
+                    "held_action_steps": self._held_action_steps,
+                    "planning_latency_total_s": self._planning_latency_s,
+                    "planning_latency_mean_s": (
+                        self._planning_latency_s / self._planning_events
+                        if self._planning_events
+                        else 0.0
+                    ),
+                }
+            )
+        return diagnostics
 
     def reset(self, seed: int | None = None) -> None:
         super().reset(seed)
         self._tool_calls = 0
         self._grounding_overrides = 0
+        self._held_modes.clear()
+        self._planning_events = 0
+        self._held_action_steps = 0
+        self._planning_latency_s = 0.0
+
+    def _onboard_action(
+        self,
+        mode: str,
+        *,
+        planned: bool,
+        planner_active_s: float = 0.0,
+    ) -> dict[str, Any]:
+        action: dict[str, Any] = {"mode": mode, "jetson_planned": planned}
+        if planned:
+            action["planner_active_s"] = max(0.0, planner_active_s)
+        return {"eventsat_0": action}
 
 
 @register("llm-s", mission="eventsat", role="ground")
-class EventSatLLMSingleShot(LLMGroundPlanner):
+class EventSatLLMSingleShot(LLMSchedulePlanner):
     """Pure LLM single-shot ground planner; safety remains prompt/environment-owned."""
 
 
 @register("hllm-s", mission="eventsat", role="ground")
-class EventSatHybridLLMSingleShot(LLMGroundPlanner):
+class EventSatHybridLLMSingleShot(LLMSchedulePlanner):
     """Single-shot LLM with symbolic schedule-format and safety grounding."""
 
     symbolic_grounding = True
 
 
 @register("llm-a", mission="eventsat", role="ground")
-class EventSatLLMAgentic(LLMGroundPlanner):
+class EventSatLLMAgentic(LLMSchedulePlanner):
     """Pure LLM bounded Plan-Tool-Reflect-Decide ground planner."""
 
     agentic = True
 
 
 @register("hllm-a", mission="eventsat", role="ground")
-class EventSatHybridLLMAgentic(LLMGroundPlanner):
+class EventSatHybridLLMAgentic(LLMSchedulePlanner):
     """Bounded agentic LLM ground planner with a symbolic safety shield."""
+
+    symbolic_grounding = True
+    agentic = True
+
+
+class LLMOnboardSchedulePlanner(LLMSchedulePlanner):
+    """Fresh-telemetry onboard scheduler with bounded plan-and-hold execution."""
+
+    role = "onboard"
+    allow_scheduled_communication = True
+
+
+@register("llm-s", mission="eventsat", role="onboard")
+class EventSatOnboardLLMSingleShot(LLMOnboardSchedulePlanner):
+    """Pure single-shot onboard LLM schedule planner."""
+
+
+@register("hllm-s", mission="eventsat", role="onboard")
+class EventSatOnboardHybridLLMSingleShot(LLMOnboardSchedulePlanner):
+    """Single-shot onboard LLM planner with symbolic schedule grounding."""
+
+    symbolic_grounding = True
+
+
+@register("llm-a", mission="eventsat", role="onboard")
+class EventSatOnboardLLMAgentic(LLMOnboardSchedulePlanner):
+    """Bounded agentic onboard LLM schedule planner."""
+
+    agentic = True
+
+
+@register("hllm-a", mission="eventsat", role="onboard")
+class EventSatOnboardHybridLLMAgentic(LLMOnboardSchedulePlanner):
+    """Bounded agentic onboard LLM planner with symbolic grounding."""
 
     symbolic_grounding = True
     agentic = True

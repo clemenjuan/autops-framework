@@ -13,7 +13,7 @@ functions.
 | Axis | Tokens | Meaning |
 |---|---|---|
 | Organisation | `sas`, `cmas`, `dmas`, `hmas`, `imas` | single agent; centralised, decentralised, hierarchical, or independent multi-agent scheduling |
-| Representation | `symb`, `llm-s`, `llm-a`, `hllm-s`, `hllm-a`, `analytical-cem`, `lewm-cem` | rules; LLM single-shot/agentic; symbolically shielded LLM; analytical or learned latent CEM MPC |
+| Representation | `symb`, `llm-s`, `llm-a`, `hllm-s`, `hllm-a`, `analytical-cem`, `lewm-cem` | rules; plan-and-hold LLM single-shot/agentic; symbolically shielded LLM; analytical or learned latent CEM MPC |
 | Paradigm | `conventional`, `ag`, `ao`, `ah` | conventional ground, autonomous ground, autonomous onboard, or dual-core hybrid authority |
 
 The LLM distinction is operational rather than rhetorical: `llm-s` makes one bounded
@@ -21,6 +21,10 @@ decision, whereas `llm-a` may perform at most three tool-mediated reasoning step
 before a decisive action. This bounded agent loop is informed by ReAct [3] and by
 language-agent architecture surveys [4]. Hybrid variants use the identical model
 response but pass it through deterministic mission grounding and safety constraints.
+For AO, an LLM decision supplies one immediate action plus a short schedule; the
+onboard adapter holds that schedule for `plan_hold` steps and measures only planning
+events as incremental Jetson compute. Hybrid AO rechecks each held action against fresh
+telemetry, while the environment remains the final safety authority.
 
 `lewm-cem` is a representation, not a special runner mode. It encodes observations,
 predicts action-conditioned latent futures, decodes audited attributes through affine
@@ -55,12 +59,13 @@ The canonical total is `1 + 7 + 3 + (3 × 7) = 32`. Runtime applicability is nar
 
 - `conventional`: ground `symb`;
 - `ag`: ground `symb`, `llm-s`, `llm-a`, `hllm-s`, or `hllm-a`;
-- `ao`: onboard `symb`, `analytical-cem`, or `lewm-cem`;
+- `ao`: onboard `symb`, `llm-s`, `llm-a`, `hllm-s`, `hllm-a`, `analytical-cem`, or `lewm-cem`;
 - `ah`: onboard `symb` or `lewm-cem`, paired with any runnable AG ground representation.
 
-The two CEM references extend the current runnable study but do not alter the historical
-32-cell definition. EventSat uses `sas`; SSA exercises all five organisation tokens
-with the symbolic AO representation at constellation sizes 20 and 100.
+The two CEM references and the four AO LLM variants extend the current runnable study
+but do not alter the historical 32-cell definition. EventSat uses `sas`; SSA exercises
+all five organisation tokens with the symbolic AO representation at constellation sizes
+20 and 100.
 
 Coordinates are expanded at runtime from `configs/matrix.yaml` and one mission file:
 

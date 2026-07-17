@@ -27,6 +27,14 @@ def test_expand_runnable_matrix_coordinate_with_paired_seeds() -> None:
     assert spec.mission_config["communications"]["sband"]["downlink_rate_kbps"] == 50
 
 
+@pytest.mark.parametrize("token", ["llm-s", "llm-a", "hllm-s", "hllm-a"])
+def test_eventsat_ao_llm_coordinates_activate_jetson_compute(token: str) -> None:
+    spec = expand_coordinate(f"eventsat/sas/ao/{token}")
+
+    assert spec.onboard_token == token
+    assert spec.onboard_uses_jetson
+
+
 @pytest.mark.parametrize("token", ["rl", "hrl"])
 def test_expand_rejects_reserved_deferred_representations(token: str) -> None:
     with pytest.raises(ValueError, match="reserved but not implemented"):

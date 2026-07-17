@@ -55,6 +55,12 @@ def test_all_matrix_tokens_register_as_eventsat_ground_plugins() -> None:
     assert expected <= plugins.keys()
 
 
+def test_all_llm_tokens_register_as_eventsat_onboard_plugins() -> None:
+    plugins = registered_plugins("eventsat")
+    expected = {("eventsat", token, "onboard") for token in ("llm-s", "llm-a", "hllm-s", "hllm-a")}
+    assert expected <= plugins.keys()
+
+
 def test_single_shot_replay_returns_new_paradigm_schedule_shape() -> None:
     planner = create_representation("eventsat", "llm-s", "ground", {"llm_replay": [_response()]})
     action = planner.select_action(_context())
@@ -64,6 +70,44 @@ def test_single_shot_replay_returns_new_paradigm_schedule_shape() -> None:
         {"mode": "charging", "steps": 3},
     ]
     assert "replay plan" in (planner.last_rationale or "")
+
+
+def test_onboard_single_shot_holds_schedule_without_extra_inference() -> None:
+    replay = [_response("communication", [["payload_send", 2]]), _response("charging")]
+    planner = create_representation(
+        "eventsat", "llm-s", "onboard", {"llm_replay": replay, "plan_hold": 3}
+    )
+    first = planner.select_action(_context())
+    second = planner.select_action(_context())
+    third = planner.select_action(_context())
+    fourth = planner.select_action(_context())
+
+    assert first["eventsat_0"]["mode"] == "communication"
+    assert first["eventsat_0"]["jetson_planned"] is True
+    assert [second["eventsat_0"]["mode"], third["eventsat_0"]["mode"]] == [
+        "payload_send",
+        "payload_send",
+    ]
+    assert not second["eventsat_0"]["jetson_planned"]
+    assert not third["eventsat_0"]["jetson_planned"]
+    assert fourth["eventsat_0"]["jetson_planned"] is True
+    assert planner.diagnostics()["planning_events"] == 2
+    assert planner.diagnostics()["held_action_steps"] == 2
+    assert planner.diagnostics()["llm_calls"] == 2.0
+
+
+def test_hybrid_onboard_rechecks_each_held_action_against_fresh_telemetry() -> None:
+    planner = create_representation(
+        "eventsat",
+        "hllm-s",
+        "onboard",
+        {"llm_replay": [_response("charging", [["payload_observe", 2]])], "plan_hold": 3},
+    )
+    planner.select_action(_context())
+    held = planner.select_action(_context(_state(battery_soc=0.30)))
+
+    assert held["eventsat_0"]["mode"] == "charging"
+    assert planner.diagnostics()["grounding_overrides"] == 1.0
 
 
 def test_pure_and_hybrid_schedule_validation_are_distinct() -> None:

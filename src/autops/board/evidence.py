@@ -32,6 +32,7 @@ class _LeWMEpisode:
 class ValidatedResult:
     experiment: dict[str, Any]
     metrics: dict[str, float]
+    metric_names: dict[str, str]
     episodes: int
     steps: int
     config_sha256: str
@@ -479,6 +480,7 @@ def validate_result_document(payload: Any, source: Path) -> ValidatedResult:
     return ValidatedResult(
         experiment=experiment,
         metrics=metrics,
+        metric_names=names,
         episodes=expected_n,
         steps=expected_steps,
         config_sha256=str(payload["provenance"]["config_sha256"]),

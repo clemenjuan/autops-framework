@@ -6,31 +6,53 @@
   <meta http-equiv="refresh" content="30">
   <title>{{TITLE}}</title>
   <style>
-    :root { color-scheme: light dark; font-family: ui-sans-serif, system-ui, sans-serif; }
-    body { margin: 0; padding: 2rem; background: #0b1220; color: #e5edf8; }
-    main { max-width: 100%; margin: auto; }
-    h1 { margin-bottom: .25rem; }
-    .meta { margin: 0 0 1.5rem; color: #9fb0c8; }
-    .table-wrap { overflow: auto; border: 1px solid #33445f; border-radius: .5rem; }
-    table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
-    th, td { padding: .65rem .8rem; border-bottom: 1px solid #263650; white-space: nowrap; }
-    th { position: sticky; top: 0; background: #15243a; text-align: left; }
-    tr:nth-child(even) { background: #111e31; }
-    td.numeric { text-align: right; }
-    footer { margin-top: 1rem; color: #9fb0c8; font-size: .9rem; }
+    :root { --blue:#0065bd; --ink:#1f2328; --muted:#616b76; --line:#d8dee4;
+      --surface:#fff; --bg:#f6f8fa; --pale:#eaf2fa; }
+    * { box-sizing: border-box; }
+    body { margin: 0; color: var(--ink); background: var(--bg);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+    header, main, footer { padding-left: 40px; padding-right: 40px; }
+    header { padding-top: 26px; padding-bottom: 13px; border-bottom: 3px solid var(--blue); }
+    h1 { margin: 0 0 6px; font-size: 22px; color: var(--ink); }
+    h1::before { content: ""; display: inline-block; width: 10px; height: 10px;
+      margin-right: 9px; border-radius: 2px; background: var(--blue); }
+    .meta { max-width: 1150px; color: var(--muted); font-size: 13.5px; line-height: 1.5; }
+    main { padding-top: 18px; padding-bottom: 36px; }
+    .table-wrap { overflow: auto; border: 1px solid var(--line); border-radius: 10px;
+      background: var(--surface); }
+    table { width: 100%; min-width: 900px; border-collapse: collapse;
+      font-size: 12.5px; font-variant-numeric: tabular-nums; }
+    th, td { border-right: 1px solid var(--line); border-bottom: 1px solid var(--line);
+      padding: 9px 12px; white-space: nowrap; }
+    th:last-child, td:last-child { border-right: none; }
+    tr:last-child td { border-bottom: none; }
+    thead th { position: sticky; top: 0; padding: 10px 12px; background: var(--pale);
+      color: var(--blue); font-size: 11px; font-weight: 700; letter-spacing: .03em;
+      text-transform: uppercase; text-align: left; }
+    tbody tr:nth-child(even) { background: #fafbfc; }
+    tbody tr:hover { background: var(--pale); }
+    td.numeric { text-align: right; font-weight: 550; }
+    td.rep { white-space: normal; max-width: 380px; }
+    .rep-name { font-weight: 650; }
+    .rep-variant { margin-top: 2px; color: var(--muted); font-size: 10.5px;
+      font-weight: 400; }
+    th[title] { cursor: help; text-decoration: underline dotted var(--line) 1px; }
+    footer { padding-bottom: 28px; color: var(--muted); font-size: 11.5px; }
   </style>
 </head>
 <body>
-  <main>
+  <header>
     <h1>{{TITLE}}</h1>
-    <p class="meta">{{RUN_COUNT}} completed coordinates · generated {{GENERATED_AT}}</p>
+    <div class="meta">{{RUN_COUNT}} completed coordinates · generated {{GENERATED_AT}}</div>
+  </header>
+  <main>
     <div class="table-wrap">
       <table>
         <thead><tr>{{HEADERS}}</tr></thead>
         <tbody>{{ROWS}}</tbody>
       </table>
     </div>
-    <footer>Only completed, provenance-bearing runs are shown. Sample count is always explicit.</footer>
   </main>
+  <footer>Only completed, provenance-bearing runs are shown. Sample count is always explicit.</footer>
 </body>
 </html>

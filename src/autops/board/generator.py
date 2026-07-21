@@ -21,6 +21,7 @@ class BoardRun:
     representation: str
     episodes: int
     metrics: dict[str, float]
+    metric_names: dict[str, str]
     source: Path
     config_sha256: str
     variant: str
@@ -77,6 +78,7 @@ def load_completed_run(path: str | Path) -> BoardRun:
         representation=str(representation),
         episodes=evidence.episodes,
         metrics=evidence.metrics,
+        metric_names=evidence.metric_names,
         source=source,
         variant=_variant(experiment, evidence.lewm),
         lewm=evidence.lewm,
@@ -115,10 +117,36 @@ def _cell(value: str, *, numeric: bool = False, title: str | None = None) -> str
     return f"<td{class_name}{title_attribute}>{html.escape(value)}</td>"
 
 
+def _representation_cell(run: BoardRun, *, detailed: bool) -> str:
+    name = html.escape(run.representation)
+    if not detailed:
+        return f'<td class="rep">{name}</td>'
+    variant = html.escape(f"{run.variant} · cfg={run.config_sha256[:12]}")
+    title = html.escape(f"config SHA-256: {run.config_sha256}", quote=True)
+    return (
+        f'<td class="rep" title="{title}"><div class="rep-name">{name}</div>'
+        f'<div class="rep-variant">{variant}</div></td>'
+    )
+
+
 def _render_table(runs: list[BoardRun]) -> tuple[str, str]:
-    metric_names = sorted({name for run in runs for name in run.metrics})
-    headers = ["coordinate", "organisation", "paradigm", "representation", "n", *metric_names]
-    header_html = "".join(f"<th>{html.escape(name)}</th>" for name in headers)
+    metric_ids = sorted({name for run in runs for name in run.metrics})
+    metric_labels = {
+        metric_id: label
+        for run in runs
+        for metric_id, label in run.metric_names.items()
+        if metric_id in metric_ids
+    }
+    fixed_headers = "".join(
+        f"<th>{html.escape(name)}</th>"
+        for name in ("coordinate", "organisation", "paradigm", "representation", "n")
+    )
+    metric_headers = "".join(
+        f'<th title="{html.escape(metric_labels.get(metric_id, ""), quote=True)}">'
+        f"{html.escape(metric_id)}</th>"
+        for metric_id in metric_ids
+    )
+    header_html = fixed_headers + metric_headers
     rows: list[str] = []
     coordinate_counts = {
         coordinate: sum(item.coordinate == coordinate for item in runs)
@@ -126,21 +154,16 @@ def _render_table(runs: list[BoardRun]) -> tuple[str, str]:
     }
     for run in runs:
         detailed = run.lewm is not None or coordinate_counts[run.coordinate] > 1
-        representation = run.representation
-        title = None
-        if detailed:
-            representation += f" · {run.variant} · cfg={run.config_sha256[:12]}"
-            title = f"config SHA-256: {run.config_sha256}"
         values = [
             _cell(run.coordinate),
             _cell(run.organisation),
             _cell(run.paradigm),
-            _cell(representation, title=title),
+            _representation_cell(run, detailed=detailed),
             _cell(str(run.episodes), numeric=True),
         ]
         values.extend(
             _cell(f"{run.metrics[name]:.6g}", numeric=True) if name in run.metrics else _cell("—")
-            for name in metric_names
+            for name in metric_ids
         )
         rows.append("<tr>" + "".join(values) + "</tr>")
     return header_html, "\n".join(rows)

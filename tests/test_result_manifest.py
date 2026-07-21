@@ -79,11 +79,13 @@ def test_manifest_rejects_tampered_result_bytes(tmp_path: Path) -> None:
         verified_result_paths(manifest_path, tmp_path)
 
 
-def test_canonical_paper_a_manifest_starts_with_no_approved_rows() -> None:
+def test_canonical_paper_a_manifest_has_verified_gate_results() -> None:
     manifest = load_result_manifest(Path("configs/papers/paper_a.yaml"))
 
     assert manifest.paper_id == "paper-a-compute-aware-planning"
-    assert manifest.approved == ()
+    assert manifest.approved
+    paths = verified_result_paths(Path("configs/papers/paper_a.yaml"), Path("."))
+    assert len(paths) == len(manifest.approved)
 
 
 def test_canonical_paper_b_manifest_starts_with_no_approved_rows() -> None:

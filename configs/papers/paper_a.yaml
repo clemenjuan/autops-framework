@@ -1,7 +1,44 @@
 schema_version: autops.paper-results-manifest/v1
 paper_id: paper-a-compute-aware-planning
 
-# Populate only after the July 18 gate passes. Diagnostic runs remain immutable
-# and may be listed separately without entering paper figures or tables.
-approved_results: []
+# Populated 2026-07-21 after the July 18 gate: 3 of 4 cells of the
+# analytical-cem 2x2 sweep (horizon 12/24 x plan_hold 1/12, seeds 42-46)
+# re-run post the forced_mode_risk fix (commit 687bb4a), the two lewm-cem
+# cells available for comparison, and the symb baseline (unaffected by the
+# fix). The analytical-cem h12/plan_hold1 cell was run with an uncommitted
+# (dirty) tree and is excluded pending a clean re-run to backfill.
+# lewm-cem h12/hold1 is n=2 (seeds 42-43 only); lewm-cem h24/hold1 and
+# h24/hold12 are not yet run. Diagnostic runs remain immutable and may be
+# listed separately without entering paper figures or tables.
+approved_results:
+  - result_id: b101584e6512cc27b5d684d76f673e4c627eb7ab6e7d2184021cf86612df9864
+    commit_sha: cf16a27a5b525b18aebd49d8f09851b2b27c55ef
+    config_sha256: 2a78a39d882f0d6080afeb0da8deb13b355ec2d9fdf47f10d045f349da0855c2
+    checkpoint_sha256: null
+    path: results/eventsat/sas/ao/symb/2a78a39d882f/b101584e6512cc27b5d684d76f673e4c627eb7ab6e7d2184021cf86612df9864.json
+  - result_id: f478a942028db3a83e5d233bcc84f3e393eec338228cd166a7bf365f6ec11cbe
+    commit_sha: e4759e551ce3d1e6bfc95b4970d7571013351853
+    config_sha256: 26de38b3752df08b5b9016f41a0b8226000ddf458969df579f2bfcc7cf408383
+    checkpoint_sha256: 9a580b05f42b998a4e76d674d6df229de3d13add3808c4fca4cf5b10ca41c2bf
+    path: results/eventsat/sas/ao/analytical-cem/26de38b3752d/f478a942028db3a83e5d233bcc84f3e393eec338228cd166a7bf365f6ec11cbe.json
+  - result_id: ae4a51fc353b8fa9028de909fee30d60f78239e4ccf4aabdc31b945db295937d
+    commit_sha: de3c13fca6ab5f39cda5495e346a5f88ea6d23ec
+    config_sha256: 3db94f0c6beb2216de8e6fade6bef14e9d68ba6d23033ac1092410e1d1c74f0c
+    checkpoint_sha256: 9a580b05f42b998a4e76d674d6df229de3d13add3808c4fca4cf5b10ca41c2bf
+    path: results/eventsat/sas/ao/analytical-cem/3db94f0c6beb/ae4a51fc353b8fa9028de909fee30d60f78239e4ccf4aabdc31b945db295937d.json
+  - result_id: 118343283f1103ccc018e28bedb800b98c838034e3863fcfa5186eb9bf1077ef
+    commit_sha: de3c13fca6ab5f39cda5495e346a5f88ea6d23ec
+    config_sha256: 77590c548f974532a61d1dec1d977f4b7b74f5f9d9a1bb10ab71e8075a759a36
+    checkpoint_sha256: 9a580b05f42b998a4e76d674d6df229de3d13add3808c4fca4cf5b10ca41c2bf
+    path: results/eventsat/sas/ao/analytical-cem/77590c548f97/118343283f1103ccc018e28bedb800b98c838034e3863fcfa5186eb9bf1077ef.json
+  - result_id: 2956d93216bcf246edc9169c040fe694c88d6b718cc43f27fe3bb54d5af6a308
+    commit_sha: cf16a27a5b525b18aebd49d8f09851b2b27c55ef
+    config_sha256: 7dcab4a03bb59f7aac9af0983e158d6f31c27936202986367256e3b7dbc586b1
+    checkpoint_sha256: 9a580b05f42b998a4e76d674d6df229de3d13add3808c4fca4cf5b10ca41c2bf
+    path: results/eventsat/sas/ao/lewm-cem/7dcab4a03bb5/2956d93216bcf246edc9169c040fe694c88d6b718cc43f27fe3bb54d5af6a308.json
+  - result_id: f30c2abeb644b3e81cf1746cfdfec499ae4c2cc5d685353f070bc915ed04a80c
+    commit_sha: e4759e551ce3d1e6bfc95b4970d7571013351853
+    config_sha256: fb6e64110f2b6d2ec1e3526d754e87905e469c537143ffb8a854236ed6d37fab
+    checkpoint_sha256: 9a580b05f42b998a4e76d674d6df229de3d13add3808c4fca4cf5b10ca41c2bf
+    path: results/eventsat/sas/ao/lewm-cem/fb6e64110f2b/f30c2abeb644b3e81cf1746cfdfec499ae4c2cc5d685353f070bc915ed04a80c.json
 diagnostic_results: []

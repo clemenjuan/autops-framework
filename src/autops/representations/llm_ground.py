@@ -43,9 +43,9 @@ def _json_object(raw: str) -> dict[str, Any]:
             line for line in text.splitlines() if not line.strip().startswith("```")
         ).strip()
     try:
-        value = json.loads(text)
+        value = json.loads(text, strict=False)
     except json.JSONDecodeError as original:
-        decoder = json.JSONDecoder()
+        decoder = json.JSONDecoder(strict=False)
         for index, character in enumerate(text):
             if character != "{":
                 continue

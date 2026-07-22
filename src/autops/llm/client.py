@@ -29,6 +29,10 @@ class LLMClient:
         self._replay_index = 0
         self._retries = max(0, int(cfg.get("llm_retries", 0)))
         self._backoff_s = max(0.0, float(cfg.get("llm_retry_backoff_s", 1.0)))
+        self._stream = bool(cfg.get("llm_stream", True))
+        self._connect_timeout_s = float(cfg.get("llm_connect_timeout_s", 15.0))
+        self._read_timeout_s = float(cfg.get("llm_read_timeout_s", 90.0))
+        self._hard_timeout_s = float(cfg.get("llm_hard_timeout_s", 300.0))
         if "ollama_host" in cfg:
             raise ValueError("Ollama endpoints must be supplied through OLLAMA_HOST")
         self._ollama_host = os.getenv("OLLAMA_HOST", "")
@@ -134,13 +138,55 @@ class LLMClient:
     def _call_ollama(
         self, system_prompt: str, user_prompt: str, temperature: float, json_mode: bool
     ) -> str:
+        """Call Ollama with a hard wall-clock timeout enforced from the outside.
+
+        Some gateways can hold an HTTPS streaming connection open while
+        emitting no chunks; requests/urllib3's ``timeout=`` does not enforce
+        per-recv reads under ``stream=True``, and closing the socket from
+        another thread does not unblock a stuck SSL read. Running the call
+        in a daemon worker thread and bounding the wait with
+        ``queue.Queue.get(timeout=...)`` is the only reliable escape. The
+        worker is abandoned (not joined) on timeout; it is a daemon and
+        writes only to a local queue, so it touches no shared state.
+        """
         if not self._ollama_host:
             raise RuntimeError("OLLAMA_HOST is required for the Ollama provider")
+        import queue
+        import threading
+
+        result_q: queue.Queue[tuple[str, Any]] = queue.Queue()
+
+        def _worker() -> None:
+            try:
+                text = self._call_ollama_inner(system_prompt, user_prompt, temperature, json_mode)
+                result_q.put(("ok", text))
+            except Exception as exc:  # relayed to the calling thread, not hidden
+                result_q.put(("err", exc))
+
+        thread = threading.Thread(target=_worker, daemon=True, name="ollama-call")
+        thread.start()
+        try:
+            status, payload = result_q.get(timeout=self._hard_timeout_s)
+        except queue.Empty as exc:
+            raise RuntimeError(
+                f"Ollama call exceeded hard timeout of {self._hard_timeout_s:g}s "
+                "(worker thread abandoned)"
+            ) from exc
+        if status == "err":
+            raise payload
+        return payload
+
+    def _call_ollama_inner(
+        self, system_prompt: str, user_prompt: str, temperature: float, json_mode: bool
+    ) -> str:
+        """Issue the actual HTTP call; streams by default. Runs in a worker thread."""
+
         import requests
 
+        url = f"{self._ollama_host.rstrip('/')}/api/chat"
         payload: dict[str, Any] = {
             "model": self.model,
-            "stream": False,
+            "stream": self._stream,
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
@@ -149,13 +195,35 @@ class LLMClient:
         }
         if json_mode:
             payload["format"] = "json"
-        response = requests.post(
-            f"{self._ollama_host.rstrip('/')}/api/chat",
-            json=payload,
-            timeout=300,
-        )
-        response.raise_for_status()
-        return str(response.json()["message"]["content"])
+        request_timeout = (self._connect_timeout_s, self._read_timeout_s)
+
+        if not self._stream:
+            response = requests.post(url, json=payload, timeout=request_timeout)
+            response.raise_for_status()
+            content = str(response.json()["message"]["content"])
+            if not content:
+                raise RuntimeError("Ollama non-streaming response empty")
+            return content
+
+        content_parts: list[str] = []
+        saw_done = False
+        with requests.post(url, json=payload, timeout=request_timeout, stream=True) as response:
+            response.raise_for_status()
+            for raw_line in response.iter_lines(decode_unicode=True):
+                if not raw_line:
+                    continue
+                try:
+                    chunk = json.loads(raw_line)
+                except json.JSONDecodeError:
+                    continue
+                content_parts.append((chunk.get("message") or {}).get("content", ""))
+                if chunk.get("done"):
+                    saw_done = True
+                    break
+        content = "".join(content_parts)
+        if not content and not saw_done:
+            raise RuntimeError("Ollama streaming response empty (no chunks from gateway)")
+        return content
 
     def _call_openai(
         self, system_prompt: str, user_prompt: str, temperature: float, json_mode: bool

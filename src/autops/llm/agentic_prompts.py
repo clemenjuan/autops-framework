@@ -459,8 +459,10 @@ To reflect on a tool result AND emit the mode and schedule simultaneously:
 
 The mode is the action for the current contact step. The schedule is a list of
 [mode, duration_in_steps] segments (1 step = 60 s) whose durations together cover
-about the planning horizon after the pass. Do not include communication in the
-schedule. Do not include any text outside the JSON object."""
+about the planning horizon after the pass. The schedule must never be empty: if
+nothing else applies, use a single charging segment covering the remaining steps.
+Do not include communication in the schedule. Do not include any text outside the
+JSON object."""
 
 
 def format_schedule_planning_prompt(
@@ -551,6 +553,8 @@ def format_schedule_planning_prompt(
         "selecting another mode is allowed and means no telemetry refresh this step. "
         f"Emit a between-pass schedule whose segment durations sum to about {gap_steps} "
         "steps, optionally validating/scoring one candidate segment with a tool first. "
+        "The schedule must never be empty; if nothing else applies, use "
+        f'[["charging", {max(1, gap_steps)}]]. '
         "Respond with JSON."
     )
     return "\n".join(lines)

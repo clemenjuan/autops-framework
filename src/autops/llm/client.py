@@ -37,6 +37,8 @@ class LLMClient:
         self._decision_log = Path(str(decision_log)) if decision_log else None
         think = cfg.get("llm_think")
         self._think = bool(think) if think is not None else None
+        max_tokens = cfg.get("llm_max_tokens")
+        self._max_tokens = int(max_tokens) if max_tokens is not None else None
         if "ollama_host" in cfg:
             raise ValueError("Ollama endpoints must be supplied through OLLAMA_HOST")
         self._ollama_host = os.getenv("OLLAMA_HOST", "")
@@ -215,6 +217,9 @@ class LLMClient:
         import requests
 
         url = f"{self._ollama_host.rstrip('/')}/api/chat"
+        options: dict[str, Any] = {"temperature": temperature}
+        if self._max_tokens is not None:
+            options["num_predict"] = self._max_tokens
         payload: dict[str, Any] = {
             "model": self.model,
             "stream": self._stream,
@@ -222,7 +227,7 @@ class LLMClient:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            "options": {"temperature": temperature},
+            "options": options,
         }
         if json_mode:
             payload["format"] = "json"

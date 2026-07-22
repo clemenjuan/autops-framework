@@ -41,7 +41,8 @@ OUTPUT FORMAT: JSON only:
   {"mode": "<immediate_mode>", "schedule": [["<later_mode>", <integer_steps>], ...],
    "rationale": "<brief explanation>"}
 The immediate mode executes now. The schedule supplies subsequent held actions and
-should cover the requested remaining plan steps."""
+should cover the requested remaining plan steps. The schedule must never be empty:
+if nothing else applies, use a single charging segment covering the remaining steps."""
 
 
 ONBOARD_AGENTIC_SCHEDULE_SYSTEM_PROMPT = (

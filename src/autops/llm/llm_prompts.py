@@ -196,7 +196,7 @@ CONSTRAINTS:
 
 OUTPUT FORMAT: a JSON object with exactly:
   {"mode": "<immediate_contact_mode>", "schedule": [["<mode>", <integer_steps>], ...], "rationale": "<brief explanation>"}
-The mode is the action for the current contact step. The schedule is a list of [mode, duration_in_steps] segments (1 step = 60 s) that together should cover about N steps after the pass. Use only the modes above. Output JSON only."""
+The mode is the action for the current contact step. The schedule is a list of [mode, duration_in_steps] segments (1 step = 60 s) that together should cover about N steps after the pass. The schedule must never be empty: if nothing else applies, use a single charging segment covering the remaining steps, e.g. [["charging", N]]. Use only the modes above. Output JSON only."""
 
 
 def format_schedule_prompt(state: Dict[str, Any], gap_steps: int) -> str:
@@ -257,6 +257,8 @@ def format_schedule_prompt(state: Dict[str, Any], gap_steps: int) -> str:
         "you want this pass step to downlink OBC data and refresh ground telemetry; "
         "selecting another mode is allowed and means no telemetry refresh this step.",
         f"Produce a between-pass schedule whose segment durations sum to about {gap_steps} steps. "
+        "The schedule must never be empty; if nothing else applies, use "
+        f'[["charging", {max(1, gap_steps)}]]. '
         'Respond with JSON: {"mode": "<contact_mode>", "schedule": [["<mode>", <steps>], ...], "rationale": "<why>"}',
     ])
     return "\n".join(lines)

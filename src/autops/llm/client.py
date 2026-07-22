@@ -33,6 +33,8 @@ class LLMClient:
         self._connect_timeout_s = float(cfg.get("llm_connect_timeout_s", 15.0))
         self._read_timeout_s = float(cfg.get("llm_read_timeout_s", 90.0))
         self._hard_timeout_s = float(cfg.get("llm_hard_timeout_s", 300.0))
+        decision_log = cfg.get("llm_decision_log")
+        self._decision_log = Path(str(decision_log)) if decision_log else None
         if "ollama_host" in cfg:
             raise ValueError("Ollama endpoints must be supplied through OLLAMA_HOST")
         self._ollama_host = os.getenv("OLLAMA_HOST", "")
@@ -83,6 +85,7 @@ class LLMClient:
             if self._cache_enabled and (cached := self._cache.get(key)) is not None:
                 self._cache_hits += 1
                 self._providers_used.add(f"cache:{cached.provider}")
+                self._log_decision(event="cache_hit", provider=cached.provider, text=cached.text)
                 return cached.text
             for attempt in range(self._retries + 1):
                 started = time.perf_counter()
@@ -94,20 +97,46 @@ class LLMClient:
                         actual_temperature,
                         json_mode,
                     )
-                    self._total_latency_s += time.perf_counter() - started
+                    latency_s = time.perf_counter() - started
+                    self._total_latency_s += latency_s
                     self._live_calls += 1
                     self._providers_used.add(provider)
                     if not text.strip():
                         raise RuntimeError("provider returned an empty response")
                     if self._cache_enabled:
                         self._cache.put(key, CacheEntry(text, provider, self.model))
+                    self._log_decision(
+                        event="success", provider=provider, text=text, latency_s=latency_s
+                    )
                     return text
                 except Exception as exc:  # provider failures are summarized, not hidden
                     failures.append(f"{provider}: {type(exc).__name__}: {exc}")
+                    self._log_decision(
+                        event="error",
+                        provider=provider,
+                        attempt=attempt + 1,
+                        error=f"{type(exc).__name__}: {exc}",
+                    )
                     if attempt < self._retries and self._backoff_s:
                         time.sleep(self._backoff_s * (2**attempt))
         detail = "; ".join(failures) or "no configured provider is available"
         raise RuntimeError(f"LLM generation failed: {detail}")
+
+    def _log_decision(self, **fields: Any) -> None:
+        """Append one human-inspectable JSON line per call; opt-in via llm_decision_log.
+
+        Independent of the response cache: this is ordered by wall-clock
+        append time and scoped to one run, so it does not require sifting a
+        content-addressed cache shared across every run that ever used it.
+        """
+
+        if self._decision_log is None:
+            return
+        record = {"ts": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "model": self.model, **fields}
+        line = json.dumps(record, ensure_ascii=False)
+        self._decision_log.parent.mkdir(parents=True, exist_ok=True)
+        with self._decision_log.open("a", encoding="utf-8") as handle:
+            handle.write(line + "\n")
 
     def _provider_order(self) -> tuple[str, ...]:
         if self.provider == "ollama":

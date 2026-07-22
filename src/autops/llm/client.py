@@ -20,7 +20,10 @@ class LLMClient:
         cfg = config or {}
         self.provider = str(cfg.get("llm_provider", "auto"))
         self.model = str(cfg.get("llm_model", "qwen3.6:35b"))
-        self.temperature = float(cfg.get("llm_temperature", 0.0))
+        # Greedy decoding is degenerate for a reasoning model: it makes every
+        # retry byte-identical, so a single unparseable response ends a run.
+        # Sampling plus an explicit seed keeps decisions replayable instead.
+        self.temperature = float(cfg.get("llm_temperature", 1.0))
         self.mock_mode = bool(cfg.get("llm_mock", False))
         replay = cfg.get("llm_replay", ())
         if isinstance(replay, str) or not isinstance(replay, Sequence):
@@ -39,6 +42,8 @@ class LLMClient:
         self._think = bool(think) if think is not None else None
         max_tokens = cfg.get("llm_max_tokens")
         self._max_tokens = int(max_tokens) if max_tokens is not None else None
+        seed = cfg.get("llm_seed")
+        self._seed = int(seed) if seed is not None else None
         if "ollama_host" in cfg:
             raise ValueError("Ollama endpoints must be supplied through OLLAMA_HOST")
         self._ollama_host = os.getenv("OLLAMA_HOST", "")
@@ -85,6 +90,9 @@ class LLMClient:
                 model=self.model,
                 temperature=actual_temperature,
                 json_mode=json_mode,
+                seed=self._seed,
+                think=self._think,
+                max_tokens=self._max_tokens,
             )
             if self._cache_enabled and (cached := self._cache.get(key)) is not None:
                 self._cache_hits += 1
@@ -100,6 +108,7 @@ class LLMClient:
                         user_prompt,
                         actual_temperature,
                         json_mode,
+                        attempt,
                     )
                     latency_s = time.perf_counter() - started
                     self._total_latency_s += latency_s
@@ -163,13 +172,19 @@ class LLMClient:
         user_prompt: str,
         temperature: float,
         json_mode: bool,
+        attempt: int,
     ) -> str:
         if provider == "ollama":
-            return self._call_ollama(system_prompt, user_prompt, temperature, json_mode)
+            return self._call_ollama(system_prompt, user_prompt, temperature, json_mode, attempt)
         return self._call_openai(system_prompt, user_prompt, temperature, json_mode)
 
     def _call_ollama(
-        self, system_prompt: str, user_prompt: str, temperature: float, json_mode: bool
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        temperature: float,
+        json_mode: bool,
+        attempt: int,
     ) -> str:
         """Call Ollama with a hard wall-clock timeout enforced from the outside.
 
@@ -191,7 +206,9 @@ class LLMClient:
 
         def _worker() -> None:
             try:
-                text = self._call_ollama_inner(system_prompt, user_prompt, temperature, json_mode)
+                text = self._call_ollama_inner(
+                    system_prompt, user_prompt, temperature, json_mode, attempt
+                )
                 result_q.put(("ok", text))
             except Exception as exc:  # relayed to the calling thread, not hidden
                 result_q.put(("err", exc))
@@ -210,7 +227,12 @@ class LLMClient:
         return payload
 
     def _call_ollama_inner(
-        self, system_prompt: str, user_prompt: str, temperature: float, json_mode: bool
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        temperature: float,
+        json_mode: bool,
+        attempt: int,
     ) -> str:
         """Issue the actual HTTP call; streams by default. Runs in a worker thread."""
 
@@ -220,6 +242,11 @@ class LLMClient:
         options: dict[str, Any] = {"temperature": temperature}
         if self._max_tokens is not None:
             options["num_predict"] = self._max_tokens
+        if self._seed is not None:
+            # Advancing per attempt is what lets a retry draw a different
+            # sample; the cache stays keyed on the base seed so the accepted
+            # decision is what replays.
+            options["seed"] = self._seed + attempt
         payload: dict[str, Any] = {
             "model": self.model,
             "stream": self._stream,

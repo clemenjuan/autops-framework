@@ -10,7 +10,7 @@ from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 
-CACHE_KEY_SCHEMA = "autops-llm-decision-v1"
+CACHE_KEY_SCHEMA = "autops-llm-decision-v2"
 
 
 def response_key(
@@ -21,8 +21,16 @@ def response_key(
     model: str,
     temperature: float,
     json_mode: bool,
+    seed: int | None = None,
+    think: bool | None = None,
+    max_tokens: int | None = None,
 ) -> str:
-    """Return a stable SHA256 identity without retaining prompt text."""
+    """Return a stable SHA256 identity without retaining prompt text.
+
+    Every input that changes what the provider generates belongs in the key:
+    reasoning mode and generation budget alter the response as decisively as
+    the prompt does, and the seed is what makes a sampled decision replayable.
+    """
 
     payload = {
         "schema": CACHE_KEY_SCHEMA,
@@ -32,6 +40,9 @@ def response_key(
         "model": model,
         "temperature": float(temperature),
         "json_mode": bool(json_mode),
+        "seed": None if seed is None else int(seed),
+        "think": None if think is None else bool(think),
+        "max_tokens": None if max_tokens is None else int(max_tokens),
     }
     encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode(
         "utf-8"

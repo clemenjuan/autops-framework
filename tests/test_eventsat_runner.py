@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import replace
 
 import pytest
 
@@ -12,6 +13,7 @@ from autops.core.types import DecisionContext
 from autops.missions.eventsat.env import EventSatEnvironment
 from autops.missions.eventsat.metrics import METRIC_IDS
 from autops.missions.eventsat.physics import planner_event_energy_wh
+from autops.orbital import GroundPass
 from autops.paradigms.base import ParadigmDecision, refresh_almanac
 from autops.representations.symb import EventSatSymbolicScheduler
 
@@ -178,3 +180,34 @@ def test_runner_persists_planner_diagnostics_and_existing_compute_energy(
     assert episode["planner_compute_energy_wh"] == pytest.approx(7.0 * 6.0 / 3600.0)
     assert episode["decision_diagnostics"]["onboard"] == {"planning_events": 3}
     assert "planner_compute_energy_wh" not in result["metric_registry"].values()
+
+
+def test_pass_entry_horizon_spans_the_gap_to_the_next_pass() -> None:
+    """A step straddling a pass start must not collapse the planning horizon.
+
+    Ground paradigms plan exactly once per pass, on its first step. Real pass
+    boundaries do not align to step edges, so that step sees the current pass
+    as both current and still-upcoming; measuring the gap against it yields a
+    negative span that clamps to one step and leaves ag/ah commanding a single
+    step per pass. The simplified backend aligns passes to step edges and never
+    exposes this, so the boundary is asserted directly.
+    """
+
+    config = deepcopy(expand_coordinate("eventsat/sas/ag/symb").mission_config)
+    config["anomalies"]["probability_per_step"] = 0.0
+    env = EventSatEnvironment(config, max_steps=200, prefer_orekit=False)
+    env.reset(42)
+
+    entry_step = 10
+    step_s = env.timestep_s
+    # The pass opens 12 s into step 10 and the next two follow 60 and 30 steps later.
+    current = GroundPass(entry_step * step_s + 12.0, 900.0, 40.0, 5.0)
+    following = GroundPass(4_500.0, 4_800.0, 40.0, 5.0)
+    third = GroundPass(6_600.0, 6_900.0, 40.0, 5.0)
+    env.orbit = replace(env.orbit, ground_passes=(current, following, third))
+    env.state.step = entry_step
+
+    assert env.physical_contact_active()
+    metadata = env.observe()["satellites"]["eventsat_0"]["metadata"]
+    assert metadata["planning_gap_steps"] == pytest.approx((4_500.0 - 900.0) / step_s)
+    assert metadata["following_gap_steps"] == pytest.approx((6_600.0 - 4_800.0) / step_s)

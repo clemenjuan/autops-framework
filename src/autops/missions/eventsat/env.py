@@ -377,15 +377,19 @@ class EventSatEnvironment:
         )
         remaining_s = max(0.0, current.end_s - now) if current else 0.0
         current_contact_s = self.orbit.contact_seconds(step) if self.orbit else 0.0
+        reference_end = current.end_s if current else now
+        # A step can straddle a pass start: contact is already active while the
+        # pass itself still begins later in the same step, which leaves the
+        # current pass inside future_passes. Measuring the gap against it then
+        # yields a negative span, so plans collapse to a single step exactly at
+        # the pass entry where ground paradigms do their planning.
+        upcoming = [item for item in future_passes if item.start_s >= reference_end]
         next_gap = period
         following_gap = period
-        if future_passes:
-            reference_end = current.end_s if current else now
-            next_gap = max(1, int((future_passes[0].start_s - reference_end) / self.timestep_s))
-        if len(future_passes) >= 2:
-            following_gap = max(
-                1, int((future_passes[1].start_s - future_passes[0].end_s) / self.timestep_s)
-            )
+        if upcoming:
+            next_gap = max(1, int((upcoming[0].start_s - reference_end) / self.timestep_s))
+        if len(upcoming) >= 2:
+            following_gap = max(1, int((upcoming[1].start_s - upcoming[0].end_s) / self.timestep_s))
         capacity_s = self.orbit.future_pass_contact_s(step, 1) if self.orbit else 0.0
         return {
             "orbital_phase": (step % period) / period,

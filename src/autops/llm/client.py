@@ -35,6 +35,8 @@ class LLMClient:
         self._hard_timeout_s = float(cfg.get("llm_hard_timeout_s", 300.0))
         decision_log = cfg.get("llm_decision_log")
         self._decision_log = Path(str(decision_log)) if decision_log else None
+        think = cfg.get("llm_think")
+        self._think = bool(think) if think is not None else None
         if "ollama_host" in cfg:
             raise ValueError("Ollama endpoints must be supplied through OLLAMA_HOST")
         self._ollama_host = os.getenv("OLLAMA_HOST", "")
@@ -224,6 +226,8 @@ class LLMClient:
         }
         if json_mode:
             payload["format"] = "json"
+        if self._think is not None:
+            payload["think"] = self._think
         request_timeout = (self._connect_timeout_s, self._read_timeout_s)
 
         if not self._stream:

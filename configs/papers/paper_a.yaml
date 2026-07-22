@@ -1,16 +1,20 @@
 schema_version: autops.paper-results-manifest/v1
 paper_id: paper-a-compute-aware-planning
 
-# Populated 2026-07-21 after the July 18 gate: 3 of 4 cells of the
-# analytical-cem 2x2 sweep (horizon 12/24 x plan_hold 1/12, seeds 42-46)
-# re-run post the forced_mode_risk fix (commit 687bb4a), the two lewm-cem
-# cells available for comparison, and the symb baseline (unaffected by the
-# fix). The analytical-cem h12/plan_hold1 cell was run with an uncommitted
-# (dirty) tree and is excluded pending a clean re-run to backfill.
+# Populated 2026-07-21 after the July 18 gate: the full analytical-cem 2x2
+# sweep (horizon 12/24 x plan_hold 1/12, seeds 42-46) re-run post the
+# forced_mode_risk fix (commit 687bb4a) -- h12/plan_hold1 backfilled clean
+# after the original dirty-tree run was excluded -- the two lewm-cem cells
+# available for comparison, and the symb baseline (unaffected by the fix).
 # lewm-cem h12/hold1 is n=2 (seeds 42-43 only); lewm-cem h24/hold1 and
 # h24/hold12 are not yet run. Diagnostic runs remain immutable and may be
 # listed separately without entering paper figures or tables.
 approved_results:
+  - result_id: b340133425c3699f8d8a98af379685831b794c5344bde453ecf983dcaac9107a
+    commit_sha: 57e9ae24863852fca00ae51d2c3975894574d1fb
+    config_sha256: e53da8e8c14422bf97182963046778b35f4f404358006a0c102ce355ce1103a7
+    checkpoint_sha256: 9a580b05f42b998a4e76d674d6df229de3d13add3808c4fca4cf5b10ca41c2bf
+    path: results/eventsat/sas/ao/analytical-cem/e53da8e8c144/b340133425c3699f8d8a98af379685831b794c5344bde453ecf983dcaac9107a.json
   - result_id: b101584e6512cc27b5d684d76f673e4c627eb7ab6e7d2184021cf86612df9864
     commit_sha: cf16a27a5b525b18aebd49d8f09851b2b27c55ef
     config_sha256: 2a78a39d882f0d6080afeb0da8deb13b355ec2d9fdf47f10d045f349da0855c2

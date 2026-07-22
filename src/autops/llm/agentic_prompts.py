@@ -461,8 +461,9 @@ The mode is the action for the current contact step. The schedule is a list of
 [mode, duration_in_steps] segments (1 step = 60 s) whose durations together cover
 about the planning horizon after the pass. The schedule must never be empty: if
 nothing else applies, use a single charging segment covering the remaining steps.
-Do not include communication in the schedule. Do not include any text outside the
-JSON object."""
+Keep the rationale to one or two concise sentences -- never think out loud inside
+it. Do not include communication in the schedule. Do not include any text outside
+the JSON object."""
 
 
 def format_schedule_planning_prompt(

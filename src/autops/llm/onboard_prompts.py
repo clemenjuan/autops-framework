@@ -42,7 +42,8 @@ OUTPUT FORMAT: JSON only:
    "rationale": "<brief explanation>"}
 The immediate mode executes now. The schedule supplies subsequent held actions and
 should cover the requested remaining plan steps. The schedule must never be empty:
-if nothing else applies, use a single charging segment covering the remaining steps."""
+if nothing else applies, use a single charging segment covering the remaining steps.
+Keep the rationale to one or two concise sentences -- never think out loud inside it."""
 
 
 ONBOARD_AGENTIC_SCHEDULE_SYSTEM_PROMPT = (

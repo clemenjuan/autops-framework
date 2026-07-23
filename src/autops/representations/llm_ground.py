@@ -149,14 +149,26 @@ class LLMSchedulePlanner(Representation):
         self._planning_latency_s += elapsed
         return self._onboard_action(mode, planned=True, planner_active_s=elapsed)
 
+    def _retry_seed(self, attempt: int) -> int | None:
+        """Per-attempt seed override so a validation retry draws a fresh sample.
+
+        The client's response cache is keyed on the seed passed to
+        ``generate``; reusing the same (unset) seed across attempts made every
+        retry here replay the first, already-rejected response from cache
+        instead of asking the model again.
+        """
+
+        base = self.client.base_seed
+        return None if base is None else base + attempt
+
     def _plan(self, state: dict[str, Any], schedule_steps: int) -> tuple[str, list[dict[str, Any]]]:
         errors: list[str] = []
-        for _ in range(self.max_retries + 1):
+        for attempt in range(self.max_retries + 1):
             try:
                 payload, trace = (
-                    self._agentic_payload(state, schedule_steps)
+                    self._agentic_payload(state, schedule_steps, attempt)
                     if self.agentic
-                    else self._single_shot_payload(state, schedule_steps)
+                    else self._single_shot_payload(state, schedule_steps, attempt)
                 )
                 mode = self._immediate_mode(payload, state)
                 schedule = self._schedule(payload.get("schedule"), schedule_steps, state)
@@ -173,7 +185,7 @@ class LLMSchedulePlanner(Representation):
         )
 
     def _single_shot_payload(
-        self, state: dict[str, Any], gap_steps: int
+        self, state: dict[str, Any], gap_steps: int, attempt: int = 0
     ) -> tuple[dict[str, Any], str]:
         system_prompt = (
             ONBOARD_SCHEDULE_SYSTEM_PROMPT if self.role == "onboard" else SCHEDULE_SYSTEM_PROMPT
@@ -187,13 +199,16 @@ class LLMSchedulePlanner(Representation):
             system_prompt,
             user_prompt,
             json_mode=True,
+            seed=self._retry_seed(attempt),
         )
         parsed = _decision(_json_object(raw))
         if parsed is None:
             raise ValueError("response contains no schedule decision")
         return parsed, ""
 
-    def _agentic_payload(self, state: dict[str, Any], gap_steps: int) -> tuple[dict[str, Any], str]:
+    def _agentic_payload(
+        self, state: dict[str, Any], gap_steps: int, attempt: int = 0
+    ) -> tuple[dict[str, Any], str]:
         context: list[dict[str, Any]] = []
         system_prompt = (
             ONBOARD_AGENTIC_SCHEDULE_SYSTEM_PROMPT
@@ -205,10 +220,12 @@ class LLMSchedulePlanner(Representation):
             if self.role == "onboard"
             else format_schedule_planning_prompt(state, gap_steps)
         )
+        seed = self._retry_seed(attempt)
         raw = self.client.generate(
             system_prompt,
             user_prompt,
             json_mode=True,
+            seed=seed,
         )
         parsed = _json_object(raw)
         turns = 1
@@ -233,6 +250,7 @@ class LLMSchedulePlanner(Representation):
                 system_prompt,
                 user_prompt,
                 json_mode=True,
+                seed=seed,
             )
             parsed = _json_object(raw)
             turns += 1
@@ -250,6 +268,7 @@ class LLMSchedulePlanner(Representation):
                 system_prompt,
                 user_prompt,
                 json_mode=True,
+                seed=seed,
             )
             decision = _decision(_json_object(raw))
         if decision is None:

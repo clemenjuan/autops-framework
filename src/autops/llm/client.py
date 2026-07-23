@@ -65,8 +65,17 @@ class LLMClient:
         *,
         temperature: float | None = None,
         json_mode: bool = False,
+        seed: int | None = None,
     ) -> str:
-        """Return one completion or raise; never substitute a symbolic decision."""
+        """Return one completion or raise; never substitute a symbolic decision.
+
+        ``seed``, when given, overrides the configured base seed for this call
+        alone (both the cache key and the actual request). A caller that retries
+        the same prompt after a validation failure -- as opposed to this
+        client's own internal ``llm_retries`` loop below -- must pass a
+        different ``seed`` each time, or the cache returns the same rejected
+        response on every subsequent call.
+        """
 
         self._calls += 1
         if self._replay:
@@ -81,6 +90,7 @@ class LLMClient:
             return _mock_response(user_prompt)
 
         actual_temperature = self.temperature if temperature is None else float(temperature)
+        actual_seed = self._seed if seed is None else int(seed)
         failures: list[str] = []
         for provider in self._provider_order():
             key = response_key(
@@ -90,7 +100,7 @@ class LLMClient:
                 model=self.model,
                 temperature=actual_temperature,
                 json_mode=json_mode,
-                seed=self._seed,
+                seed=actual_seed,
                 think=self._think,
                 max_tokens=self._max_tokens,
             )
@@ -109,6 +119,7 @@ class LLMClient:
                         actual_temperature,
                         json_mode,
                         attempt,
+                        actual_seed,
                     )
                     latency_s = time.perf_counter() - started
                     self._total_latency_s += latency_s
@@ -173,9 +184,12 @@ class LLMClient:
         temperature: float,
         json_mode: bool,
         attempt: int,
+        seed: int | None,
     ) -> str:
         if provider == "ollama":
-            return self._call_ollama(system_prompt, user_prompt, temperature, json_mode, attempt)
+            return self._call_ollama(
+                system_prompt, user_prompt, temperature, json_mode, attempt, seed
+            )
         return self._call_openai(system_prompt, user_prompt, temperature, json_mode)
 
     def _call_ollama(
@@ -185,6 +199,7 @@ class LLMClient:
         temperature: float,
         json_mode: bool,
         attempt: int,
+        seed: int | None,
     ) -> str:
         """Call Ollama with a hard wall-clock timeout enforced from the outside.
 
@@ -207,7 +222,7 @@ class LLMClient:
         def _worker() -> None:
             try:
                 text = self._call_ollama_inner(
-                    system_prompt, user_prompt, temperature, json_mode, attempt
+                    system_prompt, user_prompt, temperature, json_mode, attempt, seed
                 )
                 result_q.put(("ok", text))
             except Exception as exc:  # relayed to the calling thread, not hidden
@@ -233,6 +248,7 @@ class LLMClient:
         temperature: float,
         json_mode: bool,
         attempt: int,
+        seed: int | None,
     ) -> str:
         """Issue the actual HTTP call; streams by default. Runs in a worker thread."""
 
@@ -242,11 +258,12 @@ class LLMClient:
         options: dict[str, Any] = {"temperature": temperature}
         if self._max_tokens is not None:
             options["num_predict"] = self._max_tokens
-        if self._seed is not None:
-            # Advancing per attempt is what lets a retry draw a different
-            # sample; the cache stays keyed on the base seed so the accepted
-            # decision is what replays.
-            options["seed"] = self._seed + attempt
+        if seed is not None:
+            # Advancing per attempt is what lets this client's own llm_retries
+            # loop draw a different sample; the caller (e.g. a validation-retry
+            # loop above this client) is responsible for passing a different
+            # base seed per call if it wants the same escalation across calls.
+            options["seed"] = seed + attempt
         payload: dict[str, Any] = {
             "model": self.model,
             "stream": self._stream,
@@ -307,6 +324,12 @@ class LLMClient:
             kwargs["response_format"] = {"type": "json_object"}
         response = OpenAI().chat.completions.create(**kwargs)
         return str(response.choices[0].message.content or "")
+
+    @property
+    def base_seed(self) -> int | None:
+        """The configured ``llm_seed``, or ``None`` if sampling is unseeded."""
+
+        return self._seed
 
     def metrics(self) -> dict[str, float]:
         return {

@@ -107,7 +107,13 @@ class LLMClient:
             if self._cache_enabled and (cached := self._cache.get(key)) is not None:
                 self._cache_hits += 1
                 self._providers_used.add(f"cache:{cached.provider}")
-                self._log_decision(event="cache_hit", provider=cached.provider, text=cached.text)
+                self._log_decision(
+                    event="cache_hit",
+                    provider=cached.provider,
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    text=cached.text,
+                )
                 return cached.text
             for attempt in range(self._retries + 1):
                 started = time.perf_counter()
@@ -130,7 +136,12 @@ class LLMClient:
                     if self._cache_enabled:
                         self._cache.put(key, CacheEntry(text, provider, self.model))
                     self._log_decision(
-                        event="success", provider=provider, text=text, latency_s=latency_s
+                        event="success",
+                        provider=provider,
+                        system_prompt=system_prompt,
+                        user_prompt=user_prompt,
+                        text=text,
+                        latency_s=latency_s,
                     )
                     return text
                 except Exception as exc:  # provider failures are summarized, not hidden
@@ -138,6 +149,8 @@ class LLMClient:
                     self._log_decision(
                         event="error",
                         provider=provider,
+                        system_prompt=system_prompt,
+                        user_prompt=user_prompt,
                         attempt=attempt + 1,
                         error=f"{type(exc).__name__}: {exc}",
                     )
@@ -152,6 +165,8 @@ class LLMClient:
         Independent of the response cache: this is ordered by wall-clock
         append time and scoped to one run, so it does not require sifting a
         content-addressed cache shared across every run that ever used it.
+        Unlike the cache, this log carries prompt text -- point it at a
+        gitignored path only.
         """
 
         if self._decision_log is None:

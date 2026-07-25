@@ -187,7 +187,12 @@ def test_agentic_budget_forces_answer_extraction_after_three_turns() -> None:
 
 def test_invalid_outputs_fail_instead_of_becoming_symbolic_runs() -> None:
     invalid = json.dumps({"mode": "warp", "schedule": [["charging", 5]]})
-    planner = create_representation("eventsat", "llm-s", "ground", {"llm_replay": [invalid] * 3})
+    # Pin the retry budget: this asserts the failure mode, not the default, and
+    # the replay list must outlast every attempt for the raise to be the schema
+    # rejection rather than an exhausted replay.
+    planner = create_representation(
+        "eventsat", "llm-s", "ground", {"llm_replay": [invalid] * 3, "llm_parse_retries": 2}
+    )
     with pytest.raises(RuntimeError, match="substrate integrity"):
         planner.select_action(_context())
 

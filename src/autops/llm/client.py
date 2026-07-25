@@ -30,12 +30,20 @@ class LLMClient:
             raise TypeError("llm_replay must be a sequence of response strings")
         self._replay = [str(item) for item in replay]
         self._replay_index = 0
-        self._retries = max(0, int(cfg.get("llm_retries", 0)))
+        # Transport defaults are sized for a local reasoning model under batch
+        # concurrency, not for a fast hosted endpoint. A 35B ground model
+        # answering the mission prompt measures a median 50 s and a p90 of 162 s
+        # per call, so the earlier 90 s read timeout expired on roughly a third
+        # of calls; with no retry, one expiry aborted the whole episode and a
+        # 30-seed cell returned 2 usable seeds. Read timeout now covers the
+        # observed tail, and a bounded retry keeps a single slow call from
+        # discarding several hours of simulation.
+        self._retries = max(0, int(cfg.get("llm_retries", 2)))
         self._backoff_s = max(0.0, float(cfg.get("llm_retry_backoff_s", 1.0)))
         self._stream = bool(cfg.get("llm_stream", True))
         self._connect_timeout_s = float(cfg.get("llm_connect_timeout_s", 15.0))
-        self._read_timeout_s = float(cfg.get("llm_read_timeout_s", 90.0))
-        self._hard_timeout_s = float(cfg.get("llm_hard_timeout_s", 300.0))
+        self._read_timeout_s = float(cfg.get("llm_read_timeout_s", 300.0))
+        self._hard_timeout_s = float(cfg.get("llm_hard_timeout_s", 600.0))
         decision_log = cfg.get("llm_decision_log")
         self._decision_log = Path(str(decision_log)) if decision_log else None
         think = cfg.get("llm_think")

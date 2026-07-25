@@ -91,7 +91,11 @@ class LLMSchedulePlanner(Representation):
     def __init__(self, config: dict[str, Any] | None = None) -> None:
         super().__init__(config)
         self.client = LLMClient(self.config)
-        self.max_retries = max(0, int(self.config.get("llm_parse_retries", 2)))
+        # 20 is the Jetson methodology: a sampling reasoning model needs many
+        # draws to land a schedule that parses, and every matrix cell has run
+        # this way. Carrying it as the default keeps a forgotten override from
+        # silently running a cell under a different methodology.
+        self.max_retries = max(0, int(self.config.get("llm_parse_retries", 20)))
         # Echo tools are in the prompt. Three model turns bound the what-if loop;
         # one forced answer-extraction call may follow if the model never decides.
         self.max_agentic_steps = max(1, int(self.config.get("max_agentic_steps", 3)))

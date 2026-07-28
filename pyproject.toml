@@ -25,6 +25,7 @@ wm = [
   "torch>=2.3",
   "wandb>=0.28,<0.29",
 ]
+paper = ["matplotlib>=3.9"]
 rl = []
 
 [project.scripts]

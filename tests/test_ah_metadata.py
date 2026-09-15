@@ -55,3 +55,33 @@ def test_ah_preserves_compute_metadata_when_ground_plan_wins() -> None:
         "mode": "payload_send",
         "jetson_planned": False,
     }
+
+
+def test_ground_override_retains_energy_for_work_already_done() -> None:
+    import pytest
+
+    from autops.config import expand_coordinate
+    from autops.missions.eventsat.env import EventSatEnvironment
+
+    onboard = FixedRepresentation(
+        {
+            "eventsat_0": {
+                "mode": "payload_observe",
+                "jetson_planned": True,
+                "planner_active_s": 9.0,
+            }
+        }
+    )
+    paradigm = AutonomousHybrid(onboard, FixedRepresentation({"schedule": []}), FixedMemory())
+    env = EventSatEnvironment(
+        expand_coordinate("eventsat/sas/ao/symb").mission_config,
+        max_steps=2,
+        prefer_orekit=False,
+    )
+    observation = env.reset(42)
+    paradigm.reset(42, observation)
+    paradigm._active = ["communication"]
+    decision = paradigm.act(observation, physical_contact=False)
+    assert decision.actions["eventsat_0"]["mode"] == "communication"
+    outcome = env.step(decision.actions)
+    assert outcome.info["planner_compute_energy_wh"] == pytest.approx(7 * 9 / 3600)

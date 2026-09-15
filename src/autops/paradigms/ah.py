@@ -56,7 +56,11 @@ class AutonomousHybrid(Paradigm):
             selected = onboard_mode if onboard_mode in {"charging", "safe"} else planned
         onboard_satellite = onboard_actions.get("eventsat_0", {})
         compute = (
-            {"jetson_planned": onboard_satellite["jetson_planned"]}
+            {
+                key: onboard_satellite[key]
+                for key in ("jetson_planned", "planner_active_s")
+                if key in onboard_satellite
+            }
             if isinstance(onboard_satellite, dict) and "jetson_planned" in onboard_satellite
             else {}
         )

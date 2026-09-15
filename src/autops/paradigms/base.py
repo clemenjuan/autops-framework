@@ -49,6 +49,9 @@ class Paradigm:
 
     def after_step(self, info: dict[str, Any], observation: dict[str, Any]) -> None:
         self.memory.record({"info": info, "observation": observation})
+        onboard = getattr(self, "onboard", None)
+        if onboard is not None:
+            onboard.update({"info": info, "observation": observation})
 
     def _decide(
         self,
@@ -112,6 +115,8 @@ def refresh_almanac(stale: dict[str, Any], current: dict[str, Any]) -> dict[str,
         return refreshed
 
     metadata = dict(stale_metadata)
+    elapsed = max(0, int(current.get("step", 0)) - int(stale.get("step", 0)))
+    metadata["staleness_steps"] = int(stale_metadata.get("staleness_steps", 0)) + elapsed
     for key in _ALMANAC_KEYS:
         if key in current_metadata:
             metadata[key] = current_metadata[key]

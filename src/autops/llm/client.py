@@ -30,14 +30,7 @@ class LLMClient:
             raise TypeError("llm_replay must be a sequence of response strings")
         self._replay = [str(item) for item in replay]
         self._replay_index = 0
-        # Transport defaults are sized for a local reasoning model under batch
-        # concurrency, not for a fast hosted endpoint. A 35B ground model
-        # answering the mission prompt measures a median 50 s and a p90 of 162 s
-        # per call, so the earlier 90 s read timeout expired on roughly a third
-        # of calls; with no retry, one expiry aborted the whole episode and a
-        # 30-seed cell returned 2 usable seeds. Read timeout now covers the
-        # observed tail, and a bounded retry keeps a single slow call from
-        # discarding several hours of simulation.
+        # Bound transport retries separately from schedule-validation retries.
         self._retries = max(0, int(cfg.get("llm_retries", 2)))
         self._backoff_s = max(0.0, float(cfg.get("llm_retry_backoff_s", 1.0)))
         self._stream = bool(cfg.get("llm_stream", True))
@@ -213,7 +206,7 @@ class LLMClient:
             return self._call_ollama(
                 system_prompt, user_prompt, temperature, json_mode, attempt, seed
             )
-        return self._call_openai(system_prompt, user_prompt, temperature, json_mode)
+        return self._call_openai(system_prompt, user_prompt, temperature, json_mode, seed)
 
     def _call_ollama(
         self,
@@ -282,11 +275,9 @@ class LLMClient:
         if self._max_tokens is not None:
             options["num_predict"] = self._max_tokens
         if seed is not None:
-            # Advancing per attempt is what lets this client's own llm_retries
-            # loop draw a different sample; the caller (e.g. a validation-retry
-            # loop above this client) is responsible for passing a different
-            # base seed per call if it wants the same escalation across calls.
-            options["seed"] = seed + attempt
+            # Transport retries repeat the declared request. Only the parser's
+            # validation retry chooses a fresh seed, so cache identity stays exact.
+            options["seed"] = seed
         payload: dict[str, Any] = {
             "model": self.model,
             "stream": self._stream,
@@ -331,7 +322,12 @@ class LLMClient:
         return content
 
     def _call_openai(
-        self, system_prompt: str, user_prompt: str, temperature: float, json_mode: bool
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        temperature: float,
+        json_mode: bool,
+        seed: int | None,
     ) -> str:
         from openai import OpenAI
 
@@ -345,6 +341,10 @@ class LLMClient:
         }
         if json_mode:
             kwargs["response_format"] = {"type": "json_object"}
+        if seed is not None:
+            kwargs["seed"] = seed
+        if self._max_tokens is not None:
+            kwargs["max_completion_tokens"] = self._max_tokens
         response = OpenAI().chat.completions.create(**kwargs)
         return str(response.choices[0].message.content or "")
 

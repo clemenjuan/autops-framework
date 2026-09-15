@@ -91,14 +91,12 @@ class LLMSchedulePlanner(Representation):
     def __init__(self, config: dict[str, Any] | None = None) -> None:
         super().__init__(config)
         self.client = LLMClient(self.config)
-        # 20 is the Jetson methodology: a sampling reasoning model needs many
-        # draws to land a schedule that parses, and every matrix cell has run
-        # this way. Carrying it as the default keeps a forgotten override from
-        # silently running a cell under a different methodology.
+        # Validation draws are bounded and use distinct, cache-keyed seeds.
         self.max_retries = max(0, int(self.config.get("llm_parse_retries", 20)))
         # Echo tools are in the prompt. Three model turns bound the what-if loop;
         # one forced answer-extraction call may follow if the model never decides.
         self.max_agentic_steps = max(1, int(self.config.get("max_agentic_steps", 3)))
+        self._episode_seed = 0
         self._tool_calls = 0
         self._grounding_overrides = 0
         self.plan_hold = max(1, int(self.config.get("plan_hold", CEMConfig().plan_hold)))
@@ -153,7 +151,7 @@ class LLMSchedulePlanner(Representation):
         self._planning_latency_s += elapsed
         return self._onboard_action(mode, planned=True, planner_active_s=elapsed)
 
-    def _retry_seed(self, attempt: int) -> int | None:
+    def _retry_seed(self, attempt: int) -> int:
         """Per-attempt seed override so a validation retry draws a fresh sample.
 
         The client's response cache is keyed on the seed passed to
@@ -163,7 +161,7 @@ class LLMSchedulePlanner(Representation):
         """
 
         base = self.client.base_seed
-        return None if base is None else base + attempt
+        return (self._episode_seed if base is None else base) + attempt
 
     def _plan(self, state: dict[str, Any], schedule_steps: int) -> tuple[str, list[dict[str, Any]]]:
         errors: list[str] = []
@@ -388,6 +386,7 @@ class LLMSchedulePlanner(Representation):
 
     def reset(self, seed: int | None = None) -> None:
         super().reset(seed)
+        self._episode_seed = 0 if seed is None else int(seed)
         self._tool_calls = 0
         self._grounding_overrides = 0
         self._held_modes.clear()

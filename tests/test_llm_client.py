@@ -67,3 +67,49 @@ def test_auto_provider_without_environment_fails_explicitly(monkeypatch) -> None
     client = LLMClient({"llm_provider": "auto", "llm_cache": False})
     with pytest.raises(RuntimeError, match="no configured provider"):
         client.generate("system", "state")
+
+
+def test_openai_receives_declared_seed_and_completion_budget(monkeypatch) -> None:
+    import sys
+    from types import SimpleNamespace
+
+    captured = {}
+
+    def create(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="ok"))])
+
+    monkeypatch.setitem(
+        sys.modules,
+        "openai",
+        SimpleNamespace(
+            OpenAI=lambda: SimpleNamespace(
+                chat=SimpleNamespace(completions=SimpleNamespace(create=create))
+            )
+        ),
+    )
+    client = LLMClient({"llm_max_tokens": 321, "llm_cache": False})
+    assert client._call_provider("openai", "system", "user", 1.0, True, 2, 73) == "ok"
+    assert captured["seed"] == 73
+    assert captured["max_completion_tokens"] == 321
+
+
+def test_ollama_transport_retry_preserves_cache_key_seed(monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    requests = pytest.importorskip("requests")
+
+    captured = []
+
+    def post(_url, **kwargs):
+        captured.append(kwargs["json"])
+        return SimpleNamespace(
+            raise_for_status=lambda: None,
+            json=lambda: {"message": {"content": "ok"}},
+        )
+
+    monkeypatch.setattr(requests, "post", post)
+    client = LLMClient({"llm_stream": False, "llm_cache": False})
+    for attempt in (0, 1):
+        assert client._call_ollama_inner("system", "user", 1.0, True, attempt, 73) == "ok"
+    assert [payload["options"]["seed"] for payload in captured] == [73, 73]

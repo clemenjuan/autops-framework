@@ -201,3 +201,29 @@ def test_markdown_fence_is_tolerated_without_relaxing_schema() -> None:
     fenced = f"```json\n{_response()}\n```"
     planner = create_representation("eventsat", "llm-s", "ground", {"llm_replay": [fenced]})
     assert planner.select_action(_context())["eventsat_0"]["mode"] == "communication"
+
+
+@pytest.mark.parametrize("base_seed", [None, 73])
+def test_parse_retry_reaches_provider_and_then_replays_cache(
+    tmp_path, monkeypatch, base_seed
+) -> None:
+    config = {"llm_provider": "ollama", "llm_cache_dir": str(tmp_path), "llm_parse_retries": 2}
+    if base_seed is not None:
+        config["llm_seed"] = base_seed
+    planner = create_representation("eventsat", "llm-s", "ground", config)
+    planner.reset(42)
+    calls = []
+
+    def provider(*args):
+        calls.append(args[-1])
+        return "not json" if len(calls) == 1 else _response()
+
+    monkeypatch.setattr(planner.client, "_call_provider", provider)
+    action = planner.select_action(_context())
+    assert action["eventsat_0"]["mode"] == "communication"
+    first_seed = 42 if base_seed is None else base_seed
+    assert calls == [first_seed, first_seed + 1]
+    planner.reset(42)
+    assert planner.select_action(_context()) == action
+    assert len(calls) == 2
+    assert planner.client.metrics()["llm_cache_hits"] == 2.0

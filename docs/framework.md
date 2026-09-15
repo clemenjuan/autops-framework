@@ -34,7 +34,8 @@ planning is motivated by Hafner et al. [5] and the LeWorldModel formulation [6].
 `analytical-cem` is its matched model-based reference, in the sampling-based
 CEM-MPC tradition [7, 8, 9]. It uses the same CEM, candidate projection,
 scalarisation, guidance, plan-hold, and safety controls, but scores terminal
-attributes from the exact EventSat transitions. Contact and sunlight
+attributes from shared deterministic EventSat transitions, conditional on the almanac
+and persistent current health (future anomalies and compute events are not predicted). Contact and sunlight
 lookahead come from the environment's active orbit backend, so Orekit propagation is
 computed once as the authoritative almanac rather than duplicated per candidate.
 
@@ -83,8 +84,9 @@ The declared study total is therefore `32 + 4 + 2 + 5 = 43`. The executable subs
 - `ah`: onboard `symb` or `lewm-cem`, paired with any runnable AG ground representation.
 
 The 20 historical cells that contain a reserved `rl` or `hrl` token remain documented
-but do not run. EventSat uses `sas`; SSA exercises all five organisation tokens with the
-symbolic AO representation at constellation sizes 20 and 100.
+but do not run. EventSat uses `sas`; SSA has prototype implementations of all five organisation tokens with the
+symbolic AO representation and declared constellation sizes 20 and 100; scale validation
+and CTDE world models belong to the later constellation study.
 
 Coordinates are expanded at runtime from `configs/matrix.yaml` and one mission file:
 
@@ -106,8 +108,10 @@ pipeline. A 135-second slew is deliberately floored to two nonproductive steps. 
 optional orbital backend uses Orekit Eckstein-Hechler J2 propagation; the seeded
 fallback preserves eclipse/contact structure when Java is unavailable.
 
-SSA models detect-gated object records, local knowledge, physical ISL transport, and
-ground-delivered custody. The six actions are `charging`, `communication`,
+SSA currently uses Keplerian two-body geometry and models detect-gated object records,
+local knowledge, physical ISL record transport, and ground-delivered custody. Its mission
+YAML is the single authority for nested physical parameters. Ground records are
+bandwidth-limited; coordination telemetry remains an idealized channel. The six actions are `charging`, `communication`,
 `payload_observe`, `payload_detect`, `isl_share`, and `safe`. Utility comes from fresh
 records delivered to ground, not omniscient simulator state. Organisation policies may
 change allocation and information routing, but never sensing, link, or target truth.
@@ -144,11 +148,13 @@ run identities are reported separately in [Jetson planner evidence](jetson-bench
 ## Fairness and reproducibility
 
 - Every comparison uses `FixedMemory`; writable online learning is outside scope.
-- Launch-lottery and anomaly streams use paired episode seeds.
+- Launch-lottery and anomaly streams use paired episode seeds. Board validation checks
+  each recorded episode seed against its declared experiment index.
 - Physics, objectives, prompts, metric definitions, and trace action order are shared
   across applicable cells.
 - The world-model split is episode-disjoint. Normalisation is fitted on training
-  episodes only. Degenerate probe targets are named explicitly.
+  episodes only. Degenerate probe targets are named explicitly. Checkpoint-selection
+  validation episodes are not an untouched publication test set.
 - Results carry a configuration SHA-256, source revision, Python version, and package
   versions, but no hostname, username, endpoint, or absolute path.
 - Runtime results, artifacts, boards, logs, and private research material are ignored.

@@ -25,6 +25,7 @@ def result_payload(*, steps: int = 3, episode_steps: int = 3) -> dict:
         "paradigm": "ag",
         "representation": "symb",
         "episodes": 1,
+        "seeds": [42],
         "steps": steps,
     }
     digest = hashlib.sha256(
@@ -42,6 +43,7 @@ def result_payload(*, steps: int = 3, episode_steps: int = 3) -> dict:
         "episodes": [
             {
                 "episode_id": 0,
+                "seed": 42,
                 "steps": episode_steps,
                 "metrics": {"utility": 1.25, "robustness_cv": 0.0},
             }
@@ -66,6 +68,7 @@ def lewm_result_payload() -> dict:
         "paradigm": "ao",
         "representation": "lewm-cem",
         "episodes": 2,
+        "seeds": [42, 43],
         "steps": 4,
         "mission_config": {"power": {"onboard_compute_w": 7.0}},
         "representation_config": {"mission_mode": "downlink", "samples": 999},
@@ -109,6 +112,7 @@ def lewm_result_payload() -> dict:
     episodes = [
         {
             "episode_id": 0,
+            "seed": 42,
             "steps": 4,
             "planner_compute_energy_wh": 0.1,
             "metrics": {
@@ -121,6 +125,7 @@ def lewm_result_payload() -> dict:
         },
         {
             "episode_id": 1,
+            "seed": 43,
             "steps": 4,
             "planner_compute_energy_wh": 0.3,
             "metrics": {
@@ -347,3 +352,25 @@ def test_real_lewm_result_is_boardable(monkeypatch, tmp_path: Path) -> None:
     assert run.lewm is not None
     destination = build_board(source.parent, tmp_path / "index.html")
     assert "mode=science" in destination.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("mutation", ["missing", "episode", "provenance"])
+def test_board_rejects_unpaired_episode_seed_evidence(tmp_path: Path, mutation: str) -> None:
+    payload = result_payload()
+    if mutation == "missing":
+        payload["experiment"].pop("seeds")
+    elif mutation == "episode":
+        payload["episodes"][0]["seed"] = 999999
+    else:
+        payload["episodes"][0]["provenance"] = {"seed": 999999}
+    source = write_result(tmp_path / "unpaired.json", payload)
+    with pytest.raises(ValueError, match="seed"):
+        load_completed_run(source)
+
+
+def test_board_cannot_count_repeated_seeds_as_independent_episodes(tmp_path: Path) -> None:
+    payload = lewm_result_payload()
+    payload["experiment"]["seeds"] = [42, 42]
+    payload["episodes"][1]["seed"] = 42
+    with pytest.raises(ValueError, match="distinct integers"):
+        load_completed_run(write_result(tmp_path / "repeated.json", payload))

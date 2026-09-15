@@ -416,6 +416,24 @@ def _validate_provenance(provenance: Any, experiment: dict[str, Any], source: Pa
         raise ValueError(f"{source}: result lacks runtime provenance")
 
 
+def _validate_episode_seeds(
+    experiment: dict[str, Any], episodes: list[dict[str, Any]], source: Path
+) -> None:
+    seeds = experiment.get("seeds")
+    if not isinstance(seeds, list) or len(seeds) != len(episodes):
+        raise ValueError(f"{source}: experiment lacks the declared episode seeds")
+    if any(type(seed) is not int for seed in seeds) or len(set(seeds)) != len(seeds):
+        raise ValueError(f"{source}: episode seeds must be distinct integers")
+    for episode in episodes:
+        seed = episode.get("seed")
+        expected_seed = seeds[int(episode["episode_id"])]
+        if type(seed) is not int or seed != expected_seed:
+            raise ValueError(f"{source}: episode seed disagrees with experiment")
+        provenance_seed = episode.get("provenance", {}).get("seed", seed)
+        if type(provenance_seed) is not int or provenance_seed != seed:
+            raise ValueError(f"{source}: episode seed disagrees with episode provenance")
+
+
 def validate_result_document(payload: Any, source: Path) -> ValidatedResult:
     """Reject results whose displayed values cannot be traced to run evidence."""
 
@@ -440,6 +458,8 @@ def validate_result_document(payload: Any, source: Path) -> ValidatedResult:
         raise ValueError(f"{source}: result contains an incomplete episode")
     if sorted(int(item.get("episode_id", -1)) for item in episodes) != list(range(expected_n)):
         raise ValueError(f"{source}: episode identities are incomplete or duplicated")
+
+    _validate_episode_seeds(experiment, episodes, source)
 
     metrics = _finite_mapping(payload.get("metrics"), source, "metric")
     means = _finite_mapping(statistics.get("mean"), source, "statistics.mean")

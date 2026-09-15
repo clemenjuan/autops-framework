@@ -8,7 +8,7 @@ An experiment is a coordinate in three axes:
 - representation: rules, LLM single-shot/agentic variants, hybrid safety-shielded LLM variants, or LeWM-CEM planning;
 - operational paradigm: conventional ground (`conventional`), autonomous ground (`ag`), autonomous onboard (`ao`), or dual-core autonomous hybrid (`ah`).
 
-EventSat is the single-spacecraft scheduling benchmark. SSA is the constellation custody benchmark with sensing- and link-gated information flow. `rl` and `hrl` names are reserved for a later RLlib/PPO contribution; this repository intentionally contains no placeholder policy or RL dependency.
+EventSat is the single-spacecraft scheduling benchmark. SSA is a prototype for a later constellation-custody study with sensing- and link-gated information flow. `rl` and `hrl` names are reserved for a later RLlib/PPO contribution; this repository intentionally contains no placeholder policy or RL dependency.
 
 The design follows established spacecraft-operations practice and controlled autonomy comparisons, including Sellmaier et al., *Spacecraft Operations* (2022, [DOI](https://doi.org/10.1007/978-3-030-88593-9)) and Castano et al., “Operations for Autonomous Spacecraft” (2022, [DOI](https://doi.org/10.1109/AERO53065.2022.9843352)). LLM representations build on spacecraft-operator prompting and bounded language-agent architectures ([Rodriguez-Fernandez et al. 2024](https://doi.org/10.48550/arXiv.2404.00413); [Sumers et al. 2024](https://doi.org/10.48550/arXiv.2309.02427); [Yao et al. 2023](https://doi.org/10.48550/arXiv.2210.03629)).
 
@@ -36,6 +36,6 @@ World-model training requires W&B tracking. `autops train wm` defaults to the
 metrics, public-safe configuration and source hashes, the trace artifact, and the
 best-validation checkpoint; credentials remain environment- or netrc-managed.
 
-The learned-planning workflow ends with `uv run autops train evaluate TRACE --artifact PLANNER.json --output EVAL.json`. Evaluation uses the same categorical CEM and latent candidate scorer as closed-loop control, restricted to deterministic contexts from checkpoint-held-out episodes.
+The learned-planning workflow ends with `uv run autops train evaluate TRACE --artifact PLANNER.json --output EVAL.json`. Evaluation executes complete episodes through the deployed runner on checkpoint-validation seeds (`--max-episodes N`). It records the mission configuration and actual planner diagnostics; these seeds are not an untouched test set.
 
 See [framework.md](docs/framework.md) for the complete matrix and metric contract, and [architecture.md](docs/architecture.md) for package boundaries and extension seams.

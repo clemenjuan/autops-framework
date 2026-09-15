@@ -8,6 +8,7 @@
 6. Report honestly. Separate bugs from findings, retain negative results privately, and identify the run behind every quantitative claim.
 7. This repository is public. `research/` is private and ignored; never cite or expose its contents in code, public docs, commits, or boards. Never track hostnames, IPs, endpoints, credentials, or personal paths. Put machine details in ignored `CLAUDE.local.md`.
 8. Ground modelling and algorithm choices in literature verified through the owner's Zotero collection or a DOI. Put durable rationale and citations in tracked code/docs. Flag missing references; never invent them.
+9. On shared compute machines, work only inside the owner-approved existing checkout. Read ignored `CLAUDE.local.md` for the exact permitted directory before connecting. Do not create sibling worktrees or use other users' folders. Install dependencies only in that checkout's uv environment; any installation outside it, including a Java runtime, requires explicit owner consent. Keep temporary files and caches for new commands inside the approved checkout.
 
 # Repository contract
 

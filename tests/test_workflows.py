@@ -15,9 +15,9 @@ def test_matrix_sweep_expands_runtime_cells_without_reserved_rl() -> None:
     coordinates = matrix_coordinates("eventsat")
     assert len(coordinates) == 23
     assert "eventsat/sas/ag/symb" in coordinates
-    assert {
-        f"eventsat/sas/ao/{token}" for token in ("llm-s", "llm-a", "hllm-s", "hllm-a")
-    } <= set(coordinates)
+    assert {f"eventsat/sas/ao/{token}" for token in ("llm-s", "llm-a", "hllm-s", "hllm-a")} <= set(
+        coordinates
+    )
     assert "eventsat/sas/ao/analytical-cem" in coordinates
     assert "eventsat/sas/ao/lewm-cem" in coordinates
     assert "eventsat/sas/ah/lewm-cem/hllm-a" in coordinates
@@ -37,9 +37,7 @@ def test_eventsat_declared_design_extends_historical_32_to_43_cells() -> None:
             slot = "onboard" if paradigm == "ao" else "ground"
             baseline.update((paradigm, token) for token in rule[slot])
 
-    runnable = {
-        tuple(coordinate.split("/")[2:]) for coordinate in matrix_coordinates("eventsat")
-    }
+    runnable = {tuple(coordinate.split("/")[2:]) for coordinate in matrix_coordinates("eventsat")}
 
     assert len(baseline) == 32
     assert len(runnable) == 23
@@ -53,9 +51,7 @@ def test_matrix_sweep_filters_and_fails_when_empty() -> None:
 
 
 def test_wandb_tracking_config_uses_canonical_trace_digest_key(tmp_path) -> None:
-    spec = expand_coordinate(
-        "eventsat/sas/ao/symb", episodes=2, steps=4, seeds=[7, 8]
-    )
+    spec = expand_coordinate("eventsat/sas/ao/symb", episodes=2, steps=4, seeds=[7, 8])
     trace = load_trace(export_trace(spec, tmp_path / "trace.npz", prefer_orekit=False))
     recipe = load_eventsat_recipe()
 

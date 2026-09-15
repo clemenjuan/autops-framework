@@ -14,9 +14,7 @@ def require_wandb() -> Any:
     try:
         import wandb
     except ImportError as exc:  # pragma: no cover - exercised without the wm extra
-        raise RuntimeError(
-            "world-model training requires W&B; install the 'wm' extra"
-        ) from exc
+        raise RuntimeError("world-model training requires W&B; install the 'wm' extra") from exc
     return wandb
 
 
@@ -70,9 +68,7 @@ class WandbTrainingRun:
     def url(self) -> str:
         return str(getattr(self._run, "url", "") or "")
 
-    def _log_trace(
-        self, trace_path: str | Path, trace_metadata: Mapping[str, Any]
-    ) -> None:
+    def _log_trace(self, trace_path: str | Path, trace_metadata: Mapping[str, Any]) -> None:
         digest = str(trace_metadata["trace_sha256"])
         artifact = self._wandb.Artifact(
             name=f"eventsat-trace-{digest[:12]}",
@@ -85,9 +81,7 @@ class WandbTrainingRun:
     def log_validation(self, step: int, metrics: Mapping[str, float]) -> None:
         self._run.log(dict(metrics), step=step)
 
-    def log_checkpoint(
-        self, checkpoint_path: str | Path, metadata: Mapping[str, Any]
-    ) -> None:
+    def log_checkpoint(self, checkpoint_path: str | Path, metadata: Mapping[str, Any]) -> None:
         artifact = self._wandb.Artifact(
             name=f"eventsat-lewm-{self.run_id}",
             type="model",

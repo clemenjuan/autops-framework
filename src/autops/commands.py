@@ -99,14 +99,15 @@ def parser() -> argparse.ArgumentParser:
     probes.add_argument("--device", default="cpu")
     probes.add_argument("--seed", type=int, default=3072)
     evaluate = training.add_parser(
-        "evaluate", help="evaluate artifact CEM on held-out trace contexts"
+        "evaluate", help="run deployed CEM on checkpoint-validation seeds"
     )
     evaluate.add_argument("trace", type=Path)
     evaluate.add_argument("--artifact", type=Path, required=True)
     evaluate.add_argument("--output", type=Path, required=True)
     evaluate.add_argument("--device", default="cpu")
     evaluate.add_argument("--mission-mode", default="science")
-    evaluate.add_argument("--max-contexts", type=int, default=32)
+    evaluate.add_argument("--max-episodes", type=int, default=5)
+    evaluate.add_argument("--set", action="append", default=[])
     audit = training.add_parser("audit", help="compare linear and nonlinear frozen-feature probes")
     audit.add_argument("trace", type=Path)
     audit.add_argument("--checkpoint", type=Path, required=True)
@@ -208,7 +209,8 @@ def _train(args: argparse.Namespace) -> dict[str, Any]:
             args.output,
             device=args.device,
             mission_mode=args.mission_mode,
-            max_contexts=args.max_contexts,
+            max_episodes=args.max_episodes,
+            overrides=parse_overrides(args.set),
         )
     try:
         hidden = tuple(int(width) for width in args.hidden.split(",") if width)

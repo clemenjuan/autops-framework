@@ -91,6 +91,9 @@ def test_refresh_almanac_updates_clock_without_truth_or_resource_leaks() -> None
     }
     refreshed = refresh_almanac(stale, current)
     satellite = refreshed["satellites"]["eventsat_0"]
+    assert satellite["metadata"]["staleness_steps"] == 16
+    again = refresh_almanac(refreshed, {**current, "step": 25})
+    assert again["satellites"]["eventsat_0"]["metadata"]["staleness_steps"] == 21
     assert refreshed["step"] == 20
     assert refreshed["epoch_s"] == 1_200.0
     assert satellite["metadata"]["time_to_next_pass"] == 0.0
@@ -211,3 +214,19 @@ def test_pass_entry_horizon_spans_the_gap_to_the_next_pass() -> None:
     metadata = env.observe()["satellites"]["eventsat_0"]["metadata"]
     assert metadata["planning_gap_steps"] == pytest.approx((4_500.0 - 900.0) / step_s)
     assert metadata["following_gap_steps"] == pytest.approx((6_600.0 - 4_800.0) / step_s)
+
+
+@pytest.mark.parametrize("condition", ["anomaly", "critical"])
+def test_invalid_commands_cannot_bypass_mandatory_safety(condition: str) -> None:
+    config = expand_coordinate("eventsat/sas/ao/symb").mission_config
+    env = EventSatEnvironment(config, max_steps=2, prefer_orekit=False)
+    env.reset(42)
+    if condition == "anomaly":
+        env.state.active_anomaly = "thermal_warning"
+        env.state.forced_safe_steps = 5
+    else:
+        env.state.battery_soc = 0.19
+    outcome = env.step({"eventsat_0": {"mode": "invalid-command"}})
+    assert outcome.info["safety_resolved_mode"] == "safe"
+    assert outcome.info["forced"]
+    assert outcome.info["safety_safe"] == 1.0

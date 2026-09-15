@@ -14,6 +14,11 @@ from typing import Any
 
 import numpy as np
 
+from autops.missions.eventsat.physics import (
+    advance_projected_battery,
+    resolve_mode,
+    settle_mode,
+)
 from autops.missions.eventsat.transitions import (
     PipelineParameters,
     apply_can_transfer,
@@ -107,6 +112,7 @@ def admissible_action_mask(
     soc = _number(state, "battery_soc", 0.5)
     minimum_soc = _number(state, "battery_min_soc", 0.20)
     if health != "nominal" or soc <= minimum_soc + 0.02:
+        mask[_ACTION["charging"]] = False
         mask[_ACTION["safe"]] = True
         return mask
 
@@ -180,32 +186,6 @@ def _planning_sunlight(state: Mapping[str, Any], horizon: int) -> np.ndarray:
     return np.concatenate([values, np.full(horizon - values.size, default, dtype=bool)])
 
 
-def _advance_battery(state: dict[str, Any], effective: int, sunlight: bool) -> None:
-    power = state.get("planning_power")
-    if not isinstance(power, Mapping):
-        return
-    consumption = power.get("consumption")
-    mode = EVENTSAT_ACTIONS[effective]
-    mode_power = consumption.get(mode) if isinstance(consumption, Mapping) else None
-    if not isinstance(mode_power, Mapping):
-        return
-    phase = "sun_w" if sunlight else "eclipse_w"
-    load_w = max(0.0, _number(mode_power, phase))
-    solar_w = 0.0
-    if sunlight:
-        solar_w = max(0.0, _number(power, "generation_peak_w")) * max(
-            0.0, _number(power, "panel_efficiency_factor", 1.0)
-        )
-    hours = max(1e-12, _number(state, "step_duration_s", 60.0)) / 3600.0
-    delta_wh = (solar_w - load_w) * hours
-    if delta_wh > 0.0:
-        delta_wh *= min(1.0, max(0.0, _number(power, "charge_efficiency", 1.0)))
-    capacity_wh = max(1e-12, _number(power, "battery_capacity_wh", 70.0))
-    state["battery_soc"] = min(
-        1.0, max(0.0, _number(state, "battery_soc", 0.5) + delta_wh / capacity_wh)
-    )
-
-
 def _fallback(mask: np.ndarray, state: Mapping[str, Any]) -> int:
     safe = _ACTION["safe"]
     if str(state.get("health_status", "nominal")) != "nominal" and mask[safe]:
@@ -215,25 +195,24 @@ def _fallback(mask: np.ndarray, state: Mapping[str, Any]) -> int:
 
 
 def _resolved_action(state: dict[str, Any], requested: int, settling: int) -> int:
-    transition = max(0, int(_number(state, "transition_steps_remaining")))
-    if transition > 0:
-        transition -= 1
-        state["transition_steps_remaining"] = transition
-        if transition == 0:
-            state["previous_mode"] = EVENTSAT_ACTIONS[requested]
-        return _ACTION["charging"]
-    previous = _ACTION.get(
-        str(state.get("previous_mode", state.get("current_mode", "charging"))),
-        _ACTION["charging"],
+    resolved = resolve_mode(
+        EVENTSAT_ACTIONS[requested],
+        battery_soc=_number(state, "battery_soc", 0.5),
+        minimum_soc=_number(state, "battery_min_soc", 0.2),
+        anomaly_active=state.get("health_status", "nominal") != "nominal",
+        constraints=state.get("mode_constraints", {}),
     )
-    maneuver = {_ACTION["payload_observe"], _ACTION["communication"]}
-    if previous != requested and (previous in maneuver or requested in maneuver) and settling > 0:
-        state["transition_steps_remaining"] = settling - 1
-        if settling == 1:
-            state["previous_mode"] = EVENTSAT_ACTIONS[requested]
-        return _ACTION["charging"]
-    state["previous_mode"] = EVENTSAT_ACTIONS[requested]
-    return requested
+    state["forced"] = resolved != EVENTSAT_ACTIONS[requested]
+    effective, previous, remaining, _ = settle_mode(
+        resolved,
+        str(state.get("previous_mode", state.get("current_mode", "charging"))),
+        max(0, int(_number(state, "transition_steps_remaining"))),
+        settling,
+        set(state.get("attitude_maneuver_modes", ("payload_observe", "communication"))),
+    )
+    state["previous_mode"] = previous
+    state["transition_steps_remaining"] = remaining
+    return _ACTION[effective]
 
 
 def _apply_projected_action(
@@ -247,14 +226,14 @@ def _apply_projected_action(
     transition = None
     if effective == _ACTION["payload_observe"]:
         transition = apply_observe(state, parameters)
-    elif effective == _ACTION["payload_compress"]:
+    elif effective == _ACTION["payload_compress"] and _number(state, "uncompressed_observations"):
         state["compression_progress"] = int(_number(state, "compression_progress")) + 1
         required = max(1, int(np.ceil(_number(state, "compression_time_factor", 2.0))))
         if state["compression_progress"] >= required:
             transition = apply_compress(state, parameters)
             if transition.accepted:
                 state["compression_progress"] = 0
-    elif effective == _ACTION["payload_detect"]:
+    elif effective == _ACTION["payload_detect"] and _number(state, "undetected_observations"):
         state["detection_progress"] = int(_number(state, "detection_progress")) + 1
         required = max(1, int(np.ceil(_number(state, "detection_time_steps", 5.0))))
         if state["detection_progress"] >= required:
@@ -285,7 +264,9 @@ def project_executable_candidates(
     if np.any((requested < 0) | (requested >= len(EVENTSAT_ACTIONS))):
         raise ValueError("candidate sequences contain an invalid EventSat action")
     horizon = requested.shape[1]
-    capacities = contact_capacities(state, horizon)
+    capacities = contact_capacities(
+        state, horizon + max(0, int(_number(state, "settling_time_steps"))) + 1
+    )
     rate = max(1e-12, _number(state, "downlink_rate_kbps", 50.0))
     contacts_s = capacities * 8000.0 / rate
     sunlight = _planning_sunlight(state, horizon)
@@ -300,6 +281,9 @@ def project_executable_candidates(
         for offset, requested_value in enumerate(row):
             simulation["contact_window_seconds"] = float(contacts_s[offset])
             simulation["physical_ground_pass_active"] = contacts_s[offset] > 0.0
+            simulation["contact_window_active"] = bool(
+                np.any(contacts_s[offset : offset + settling + 1] > 0.0)
+            )
             mask = admissible_action_mask(
                 simulation,
                 reserve_soc=reserve_soc,
@@ -312,9 +296,16 @@ def project_executable_candidates(
                 repairs[sample] += 1
             projected[sample, offset] = action
             effective = _resolved_action(simulation, action, settling)
-            forced[sample] = effective != int(requested_value)
+            forced[sample] = simulation["forced"]
             _apply_projected_action(simulation, effective, parameters, float(contacts_s[offset]))
-            _advance_battery(simulation, effective, bool(sunlight[offset]))
+            advance_projected_battery(
+                simulation, EVENTSAT_ACTIONS[effective], bool(sunlight[offset])
+            )
+        simulation["contact_window_seconds"] = float(contacts_s[horizon])
+        simulation["physical_ground_pass_active"] = contacts_s[horizon] > 0.0
+        simulation["contact_window_active"] = bool(
+            np.any(contacts_s[horizon : horizon + settling + 1] > 0.0)
+        )
         terminal.append(simulation)
     return CandidateProjection(projected, tuple(terminal), repairs, forced)
 

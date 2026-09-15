@@ -9,6 +9,7 @@ comparisons (see also Hafner et al. 2023, arXiv:2301.04104 for world models).
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -16,6 +17,40 @@ import numpy as np
 
 from autops.missions.eventsat.transitions import total_storage_mb
 from autops.wm.schema import EVENTSAT_ACTIONS as MODES
+
+
+def resolve_mode(
+    requested: str,
+    *,
+    battery_soc: float,
+    minimum_soc: float,
+    anomaly_active: bool,
+    constraints: Mapping[str, Any],
+) -> str:
+    """Apply mandatory safety before validating an optional mission command."""
+
+    if anomaly_active or battery_soc <= minimum_soc:
+        return "safe"
+    if requested not in MODES:
+        return "charging"
+    if battery_soc < float(constraints.get(requested, {}).get("min_battery_soc", 0.0)):
+        return "charging"
+    return requested
+
+
+def settle_mode(
+    resolved: str, previous: str, remaining: int, settling: int, maneuver_modes: set[str]
+) -> tuple[str, str, int, bool]:
+    """Return effective mode, pointing history, countdown, and transition flag."""
+
+    if remaining > 0:
+        remaining -= 1
+        return "charging", resolved if remaining == 0 else previous, remaining, True
+    maneuver = previous != resolved and (resolved in maneuver_modes or previous in maneuver_modes)
+    if maneuver and settling > 0:
+        remaining = settling - 1
+        return "charging", resolved if remaining == 0 else previous, remaining, True
+    return resolved, resolved, 0, False
 
 
 @dataclass
@@ -145,6 +180,37 @@ def encode_vectors(observation: dict[str, Any]) -> tuple[np.ndarray, np.ndarray,
     return obs, np.asarray(state_values, dtype=np.float32), raw
 
 
+def battery_soc_after_energy(
+    soc: float, energy_delta_wh: float, capacity_wh: float, charge_efficiency: float
+) -> float:
+    """Apply charging losses only to surplus energy and clamp the battery state."""
+
+    delta = energy_delta_wh * charge_efficiency if energy_delta_wh > 0 else energy_delta_wh
+    return min(1.0, max(0.0, soc + delta / capacity_wh))
+
+
+def mode_energy_wh(
+    power: Mapping[str, Any],
+    mode: str,
+    in_sunlight: bool,
+    step_duration_s: float,
+    *,
+    planner_energy_wh: float = 0.0,
+) -> tuple[float, float]:
+    """Return gross load and solar generation for one mission transition."""
+
+    phase = "sun_w" if in_sunlight else "eclipse_w"
+    load_w = float(power["consumption"][mode][phase])
+    solar = power["solar_panels"]
+    generation_w = (
+        float(solar["generation_peak_w"]) * float(solar["panel_efficiency_factor"])
+        if in_sunlight
+        else 0.0
+    )
+    hours = step_duration_s / 3600.0
+    return load_w * hours + max(0.0, planner_energy_wh), generation_w * hours
+
+
 def power_step(
     state: EventSatState,
     config: dict[str, Any],
@@ -154,24 +220,20 @@ def power_step(
     planner_energy_wh: float = 0.0,
 ) -> dict[str, float]:
     power = config["power"]
-    phase = "sun_w" if in_sunlight else "eclipse_w"
-    load_w = float(power["consumption"][mode][phase])
-    solar = power["solar_panels"]
-    generation_w = (
-        float(solar["generation_peak_w"]) * float(solar["panel_efficiency_factor"])
-        if in_sunlight
-        else 0.0
-    )
-    hours = float(config["simulation"]["timestep_s"]) / 3600.0
     planner_wh = max(0.0, float(planner_energy_wh))
-    gross_wh = load_w * hours + planner_wh
-    solar_wh = generation_w * hours
+    gross_wh, solar_wh = mode_energy_wh(
+        power,
+        mode,
+        in_sunlight,
+        float(config["simulation"]["timestep_s"]),
+        planner_energy_wh=planner_wh,
+    )
     energy_delta = solar_wh - gross_wh
-    if energy_delta > 0:
-        energy_delta *= float(power["battery"]["charge_efficiency"])
     capacity = float(power["battery"]["capacity_wh"])
     previous = state.battery_soc
-    state.battery_soc = min(1.0, max(0.0, previous + energy_delta / capacity))
+    state.battery_soc = battery_soc_after_energy(
+        previous, energy_delta, capacity, float(power["battery"]["charge_efficiency"])
+    )
     state.cumulative_gross_wh += gross_wh
     state.cumulative_solar_wh += solar_wh
     state.cumulative_planner_wh += planner_wh
@@ -196,3 +258,22 @@ def planner_event_energy_wh(config: dict[str, Any], mode: str, *, active_time_s:
     idle_w = max(0.0, float(model.get("idle_power_w", 0.0)))
     idle_s = max(0.0, float(model.get("idle_time_s", 0.0)))
     return active_w * active_s / 3600.0 + boot_wh + idle_w * idle_s / 3600.0
+
+
+def advance_projected_battery(state: dict[str, Any], mode: str, sunlight: bool) -> None:
+    power = state.get("planning_power")
+    if not isinstance(power, Mapping):
+        return
+    gross_wh, solar_wh = mode_energy_wh(
+        power,
+        mode,
+        sunlight,
+        float(state.get("step_duration_s", 60.0)),
+    )
+    battery = power["battery"]
+    state["battery_soc"] = battery_soc_after_energy(
+        float(state.get("battery_soc", 0.5)),
+        solar_wh - gross_wh,
+        float(battery["capacity_wh"]),
+        float(battery["charge_efficiency"]),
+    )

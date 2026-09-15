@@ -85,6 +85,7 @@ class EventSatCEMBase(Representation):
     def __init__(self, config: dict[str, Any] | None = None) -> None:
         super().__init__(config)
         self.artifact, self._artifact_path = _configured_artifact(self.config)
+        self.config = {**self.artifact.planner_controls, **self.config}
         if self.artifact.model.mission != "eventsat":
             raise ValueError(f"EventSat {self.token} requires an EventSat model artifact")
         if self.artifact.model.action_names != EVENTSAT_ACTIONS:
@@ -98,29 +99,25 @@ class EventSatCEMBase(Representation):
             self.config.get("normalize_attribute_scale", self.artifact.normalize_attribute_scale)
         )
         self._weights, self._mission_weights = self._attribute_weights()
-        self._reserve_soc = float(self.config.get("reserve_soc", 0.50))
-        self._comms_soc_floor = float(self.config.get("comms_soc_floor", 0.25))
-        self._downlink_reflex = bool(
-            self.config.get("downlink_reflex", self.config.get("contact_reflex_enabled", True))
-        )
+        self._reserve_soc = float(self.config["reserve_soc"])
+        self._comms_soc_floor = float(self.config["comms_soc_floor"])
+        self._downlink_reflex = bool(self.config["downlink_reflex"])
         if bool(self.config.get("exact_analytic_shaping", False)):
             raise ValueError(f"exact_analytic_shaping is intentionally unsupported by {self.token}")
-        self._lightweight_shaping = bool(self.config.get("lightweight_shaping", True))
-        self._contact_guidance = bool(self.config.get("contact_guidance", True))
-        self._contact_guidance_strength = float(self.config.get("contact_guidance_strength", 0.75))
+        self._lightweight_shaping = bool(self.config["lightweight_shaping"])
+        self._contact_guidance = bool(self.config["contact_guidance"])
+        self._contact_guidance_strength = float(self.config["contact_guidance_strength"])
         if not np.isfinite(self._contact_guidance_strength):
             raise ValueError("contact_guidance_strength must be finite")
         self._contact_guidance_strength = min(1.0, max(0.0, self._contact_guidance_strength))
-        self._undeliverable_capacity_penalty = float(
-            self.config.get("undeliverable_capacity_penalty", 0.02)
-        )
+        self._undeliverable_capacity_penalty = float(self.config["undeliverable_capacity_penalty"])
         if not np.isfinite(self._undeliverable_capacity_penalty):
             raise ValueError("undeliverable_capacity_penalty must be finite")
         self._undeliverable_capacity_penalty = max(0.0, self._undeliverable_capacity_penalty)
-        self._downlink_reward = float(self.config.get("downlink_reward", 1.0))
-        self._pass_stage_reward = float(self.config.get("pass_stage_reward", 0.15))
+        self._downlink_reward = float(self.config["downlink_reward"])
+        self._pass_stage_reward = float(self.config["pass_stage_reward"])
         self._downlink_reference_weight = max(
-            1e-9, float(self.config.get("downlink_shaping_reference_weight", 0.25))
+            1e-9, float(self.config["downlink_shaping_reference_weight"])
         )
         self._action_index = {name: index for index, name in enumerate(EVENTSAT_ACTIONS)}
         self._rng = np.random.default_rng(self.cem.seed)
@@ -143,6 +140,8 @@ class EventSatCEMBase(Representation):
             "scorer_kind": self.scorer_kind,
             "propagation_model": self.propagation_model,
             "uses_checkpoint": self.uses_checkpoint,
+            "planner_controls": {key: self.config[key] for key in self.artifact.planner_controls},
+            "target_definition_version": self.artifact.target_definition_version,
         }
 
     def reset(self, seed: int | None = None) -> None:
@@ -156,13 +155,31 @@ class EventSatCEMBase(Representation):
         self._last_action = self._action_index["charging"]
         self._compute.reset()
 
+    def update(self, transition: dict[str, Any]) -> None:
+        """Track the command actually issued when a hybrid ground plan overrides us."""
+
+        requested = transition.get("info", {}).get("requested_mode")
+        if requested not in self._action_index:
+            return
+        actual = self._action_index[requested]
+        if actual != self._last_action:
+            self._held_actions.clear()
+            self._previous_solution = None
+            self._last_action = actual
+            if self._action_history:
+                self._action_history[-1] = np.eye(self.artifact.model.action_dim, dtype=np.float32)[
+                    actual
+                ]
+
     def encode_observation(self, observation: dict[str, Any]) -> dict[str, Any]:
         obs, _, raw = encode_vectors(observation)
         return {
             **raw,
             "obs25": obs,
             "timestep": int(observation.get("step", 0)),
-            "step_duration_s": float(self.config.get("step_duration_s", 60.0)),
+            "step_duration_s": float(
+                raw.get("step_duration_s", self.config.get("step_duration_s", 60.0))
+            ),
         }
 
     def mission_action_mask(self, state: Mapping[str, Any]) -> np.ndarray:

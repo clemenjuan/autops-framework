@@ -11,7 +11,7 @@ import numpy as np
 from autops.wm.dataset import EpisodeSplit, split_episodes
 from autops.wm.schema import TraceDataset
 
-TARGET_DEFINITION_VERSION = "autops.eventsat.probe-targets/v1"
+TARGET_DEFINITION_VERSION = "autops.eventsat.probe-targets/v2"
 
 DEFAULT_ATTRIBUTES = (
     "battery_margin",
@@ -100,6 +100,11 @@ def build_eventsat_targets(trace: TraceDataset) -> np.ndarray:
     stored = sum(
         state[..., index[name]] for name in ("obc_data_mb", "jetson_raw_mb", "jetson_compressed_mb")
     )
+    # A trace row stores s_t and the outgoing override for a_t. The latent at
+    # s_t must be labeled with the incoming transition a_(t-1), not a future
+    # command that was unavailable when s_t was predicted. Reset has no override.
+    incoming_forced = np.zeros_like(trace.forced_mode)
+    incoming_forced[:, 1:] = trace.forced_mode[:, :-1]
     return eventsat_attribute_values(
         battery_soc=state[..., index["battery_soc"]],
         stored_mb=stored,
@@ -108,7 +113,7 @@ def build_eventsat_targets(trace: TraceDataset) -> np.ndarray:
         total_observation_s=state[..., index["total_observation_s"]],
         total_detections=state[..., index["total_detections"]],
         communication_opportunity=state[..., index["ground_pass_active"]] > 0.5,
-        forced_mode_risk=trace.forced_mode,
+        forced_mode_risk=incoming_forced,
         health_nominal=state[..., index["health_nominal"]],
     )
 

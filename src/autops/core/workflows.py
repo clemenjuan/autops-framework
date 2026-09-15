@@ -307,6 +307,7 @@ def _planner_artifact(
         cem=replace(fit.recipe.planner.cem, seed=seed),
         mode_weight_presets=fit.recipe.planner.mode_weight_presets,
         normalize_attribute_scale=fit.recipe.planner.normalize_attribute_scale,
+        planner_controls=fit.recipe.planner.policy_config(),
     )
 
 

@@ -14,10 +14,11 @@ from typing import Any
 
 from autops.core.types import EnvironmentStep
 from autops.missions.eventsat.physics import (
-    MODES,
     EventSatState,
     planner_event_energy_wh,
     power_step,
+    resolve_mode,
+    settle_mode,
 )
 from autops.missions.eventsat.transitions import (
     PipelineParameters,
@@ -237,34 +238,26 @@ class EventSatEnvironment:
         return mode, active_s, planned
 
     def _resolve_mode(self, requested: str) -> str:
-        if requested not in MODES:
-            return "charging"
-        state = self.state
-        battery = self.config["power"]["battery"]
-        if state.active_anomaly is not None or state.battery_soc <= float(battery["min_soc"]):
-            return "safe"
-        constraint = self.config["modes"].get("constraints", {}).get(requested, {})
-        if state.battery_soc < float(constraint.get("min_battery_soc", 0.0)):
-            return "charging"
-        return requested
+        return resolve_mode(
+            requested,
+            battery_soc=self.state.battery_soc,
+            minimum_soc=float(self.config["power"]["battery"]["min_soc"]),
+            anomaly_active=self.state.active_anomaly is not None,
+            constraints=self.config["modes"].get("constraints", {}),
+        )
 
     def _settle(self, resolved: str) -> tuple[str, bool]:
         state = self.state
-        if state.transition_steps_remaining > 0:
-            state.transition_steps_remaining -= 1
-            if state.transition_steps_remaining == 0:
-                state.previous_mode = resolved
-            return "charging", True
-        maneuver = state.previous_mode != resolved and (
-            resolved in self.maneuver_modes or state.previous_mode in self.maneuver_modes
+        effective, state.previous_mode, state.transition_steps_remaining, transitioning = (
+            settle_mode(
+                resolved,
+                state.previous_mode,
+                state.transition_steps_remaining,
+                self.settling_steps,
+                self.maneuver_modes,
+            )
         )
-        if maneuver and self.settling_steps > 0:
-            state.transition_steps_remaining = self.settling_steps - 1
-            if state.transition_steps_remaining == 0:
-                state.previous_mode = resolved
-            return "charging", True
-        state.previous_mode = resolved
-        return resolved, False
+        return effective, transitioning
 
     def _apply_mode(self, mode: str, contact_s: float) -> dict[str, Any]:
         state = self.state
@@ -414,7 +407,6 @@ class EventSatEnvironment:
         state = self.state
         offsets = range(self.planning_lookahead_steps)
         power = self.config["power"]
-        solar = power["solar_panels"]
         battery = power["battery"]
         return {
             "planning_contact_seconds": [
@@ -426,13 +418,10 @@ class EventSatEnvironment:
                 for offset in offsets
             ],
             "battery_min_soc": float(battery["min_soc"]),
-            "planning_power": {
-                "consumption": power["consumption"],
-                "generation_peak_w": float(solar["generation_peak_w"]),
-                "panel_efficiency_factor": float(solar["panel_efficiency_factor"]),
-                "battery_capacity_wh": float(battery["capacity_wh"]),
-                "charge_efficiency": float(battery["charge_efficiency"]),
-            },
+            "mode_constraints": self.config["modes"].get("constraints", {}),
+            "attitude_maneuver_modes": tuple(sorted(self.maneuver_modes)),
+            "planning_power": power,
+            "step_duration_s": self.timestep_s,
         }
 
     def _pipeline_parameters(self) -> PipelineParameters:

@@ -262,3 +262,16 @@ def test_training_restores_lowest_validation_weights(tmp_path, monkeypatch) -> N
     checkpoint = save_checkpoint(tmp_path / "best.ckpt", result)
     payload = torch.load(checkpoint, map_location="cpu", weights_only=True)
     assert float(payload["state_dict"]["weight"]) == pytest.approx(validation_weights[0])
+
+
+def test_probe_override_target_belongs_to_incoming_transition() -> None:
+    from autops.wm.probes import DEFAULT_ATTRIBUTES, build_eventsat_targets
+
+    trace = _trace(np.zeros((2, 4, 25), dtype=np.float32))
+    trace.forced_mode[0] = [1, 0, 1, 0]
+    trace.forced_mode[1] = [0, 1, 0, 1]
+    targets = build_eventsat_targets(trace)
+    np.testing.assert_array_equal(
+        targets[..., DEFAULT_ATTRIBUTES.index("forced_mode_risk")],
+        [[0, 1, 0, 1], [0, 0, 1, 0]],
+    )

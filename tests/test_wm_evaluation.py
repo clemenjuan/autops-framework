@@ -11,8 +11,8 @@ from autops.commands import main
 from autops.config import expand_coordinate
 from autops.core.exporter import export_trace
 from autops.core.workflows import evaluate_lewm_cem, fit_planner_artifact
+from autops.representations import cem_planner as deployment_module
 from autops.wm import cem as cem_module
-from autops.wm import evaluation as evaluation_module
 from autops.wm.artifact import (
     artifact_sha256,
     load_artifact,
@@ -87,53 +87,35 @@ def test_offline_evaluation_invokes_canonical_cem_and_is_portable(
     evaluation_bundle: tuple[Path, Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     trace_path, artifact_path = evaluation_bundle
-    assert evaluation_module.categorical_cem is cem_module.categorical_cem
+    assert deployment_module.categorical_cem is cem_module.categorical_cem
     canonical = cem_module.categorical_cem
-    calls = 0
+    calls = []
 
     def tracked(*args, **kwargs):
-        nonlocal calls
-        calls += 1
+        calls.append(kwargs)
         return canonical(*args, **kwargs)
 
-    monkeypatch.setattr(evaluation_module, "categorical_cem", tracked)
+    monkeypatch.setattr(deployment_module, "categorical_cem", tracked)
     output = tmp_path / "evaluation.json"
-    summary = evaluate_lewm_cem(
-        trace_path,
-        artifact_path,
-        output,
-        max_contexts=2,
-        mission_mode="science",
-    )
-
-    assert calls == 2
-    assert summary["contexts"] == 2
-    payload = json.loads(output.read_text(encoding="utf-8"))
+    summary = evaluate_lewm_cem(trace_path, artifact_path, output, max_episodes=2)
+    payload = json.loads(output.read_text())
     serialized = json.dumps(payload)
     assert str(trace_path) not in serialized
     assert str(artifact_path) not in serialized
-    assert payload["schema_version"] == "autops.lewm.cem-evaluation/v1"
-    assert payload["config"]["cem"]["samples"] == 8
-    assert payload["aggregate"]["cem_candidate_rollouts"] == 2 * 8 * 2
-    assert set(payload["aggregate"]["recorded_attribute_rmse"]) == set(
-        payload["contexts"][0]["planned_attributes"]
-    )
+    assert payload["schema_version"] == "autops.lewm.cem-evaluation/v2"
+    assert summary["episodes"] == 2
+    run = payload["run"]
+    diagnostics = [episode["decision_diagnostics"]["onboard"] for episode in run["episodes"]]
+    assert len(calls) == sum(item["planning_events"] for item in diagnostics)
+    assert all(item["held_action_steps"] > 0 for item in diagnostics)
+    assert all(call["project_candidates"] is not None for call in calls)
+    assert all(call["proposal_guidance"] is not None for call in calls)
+    assert any(call["previous_solution"] is not None for call in calls)
+    assert all(item["steps"] == 7 for item in run["episodes"])
     assert payload["contracts"]["cem_function"] == "autops.wm.cem.categorical_cem"
-    assert payload["runtime_provenance"]["source_revision"]
+    assert run["provenance"]["source_revision"]
     assert payload["hashes"]["artifact_sha256"] == artifact_sha256(load_artifact(artifact_path))
-    assert {item["episode_id"] for item in payload["contexts"]} <= set(payload["held_out_episodes"])
-    for context in payload["contexts"]:
-        assert len(context["planned_actions"]) == 2
-        assert len(context["recorded_actions"]) == 2
-        assert set(context["scores"]) == {
-            "planned_model",
-            "recorded_policy_model",
-            "recorded_policy_realized",
-            "model_improvement",
-            "recorded_model_error",
-            "last_iteration_elite_mean",
-            "last_iteration_elite_std",
-        }
+    assert "not an untouched test set" in payload["protocol"]["split"]
 
 
 def test_evaluation_cli_writes_durable_evidence(
@@ -151,7 +133,7 @@ def test_evaluation_cli_writes_durable_evidence(
                 str(artifact_path),
                 "--output",
                 str(output),
-                "--max-contexts",
+                "--max-episodes",
                 "1",
             ]
         )
@@ -159,8 +141,8 @@ def test_evaluation_cli_writes_durable_evidence(
     )
     summary = json.loads(capsys.readouterr().out)
     assert summary["evaluation"] == str(output)
-    assert summary["contexts"] == 1
-    assert json.loads(output.read_text(encoding="utf-8"))["aggregate"]["context_count"] == 1
+    assert summary["episodes"] == 1
+    assert len(json.loads(output.read_text(encoding="utf-8"))["run"]["episodes"]) == 1
 
 
 def test_evaluation_rejects_changed_trace(
@@ -172,7 +154,7 @@ def test_evaluation_rejects_changed_trace(
     changed_path = write_trace(tmp_path / "changed.npz", changed)
 
     with pytest.raises(ValueError, match="SHA-256"):
-        evaluate_lewm_cem(changed_path, artifact_path, tmp_path / "bad.json", max_contexts=1)
+        evaluate_lewm_cem(changed_path, artifact_path, tmp_path / "bad.json", max_episodes=1)
 
 
 def test_evaluation_rejects_replaced_checkpoint(
@@ -190,3 +172,40 @@ def test_evaluation_rejects_replaced_checkpoint(
 
     with pytest.raises(ValueError, match="checkpoint SHA-256"):
         evaluate_lewm_cem(evaluation_bundle[0], copied_artifact, tmp_path / "bad-checkpoint.json")
+
+
+def test_recipe_policy_controls_are_exported_and_used_by_deployment(
+    evaluation_bundle: tuple[Path, Path],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from autops.core import workflows
+    from autops.representations.wm_planner import EventSatLeWMCEM
+    from autops.wm.recipe import load_eventsat_recipe
+
+    recipe = load_eventsat_recipe()
+    edited = replace(
+        recipe,
+        planner=replace(
+            recipe.planner,
+            reserve_soc=0.91,
+            downlink_reflex=False,
+            contact_guidance=False,
+        ),
+    )
+    monkeypatch.setattr(workflows, "load_eventsat_recipe", lambda: edited)
+    trace_path, original_path = evaluation_bundle
+    original = load_artifact(original_path)
+    fitted = fit_planner_artifact(
+        trace_path,
+        resolve_checkpoint(original_path, original),
+        tmp_path / "edited.json",
+    )
+    planner = EventSatLeWMCEM({"artifact_path": fitted["artifact"]})
+    assert planner._reserve_soc == 0.91
+    assert not planner._downlink_reflex
+    assert not planner._contact_guidance
+    assert not planner.mission_action_mask({"battery_soc": 0.8})[1]
+    explicit = EventSatLeWMCEM({"artifact_path": fitted["artifact"], "reserve_soc": 0.5})
+    assert explicit._reserve_soc == 0.5
+    assert explicit.artifact.target_definition_version.endswith("/v2")

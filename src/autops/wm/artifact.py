@@ -7,7 +7,7 @@ import json
 import math
 import shutil
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -26,7 +26,11 @@ from autops.wm._contract_io import (
 from autops.wm._contract_io import (
     relative_bundle_path as _relative_checkpoint,
 )
+from autops.wm._contract_io import (
+    validate_planner_controls,
+)
 from autops.wm.cem import CEMConfig
+from autops.wm.probes import TARGET_DEFINITION_VERSION
 from autops.wm.schema import (
     EVENTSAT_ACTIONS,
     EVENTSAT_OBSERVATIONS,
@@ -34,7 +38,7 @@ from autops.wm.schema import (
     SSA_OBSERVATIONS,
 )
 
-ARTIFACT_SCHEMA_VERSION = "autops.lewm.planner/v3"
+ARTIFACT_SCHEMA_VERSION = "autops.lewm.planner/v4"
 
 
 def checkpoint_sha256(path_like: str | Path) -> str:
@@ -319,6 +323,12 @@ class ProbeEvidenceContract:
         )
 
 
+def _default_planner_controls() -> dict[str, Any]:
+    from autops.wm.recipe import load_eventsat_recipe
+
+    return load_eventsat_recipe().planner.policy_config()
+
+
 @dataclass(frozen=True)
 class PlannerArtifact:
     model: ModelContract
@@ -328,11 +338,16 @@ class PlannerArtifact:
     cem: CEMConfig = field(default_factory=CEMConfig)
     mode_weight_presets: dict[str, dict[str, float]] = field(default_factory=dict)
     normalize_attribute_scale: bool = True
+    planner_controls: dict[str, Any] = field(default_factory=_default_planner_controls)
+    target_definition_version: str = TARGET_DEFINITION_VERSION
     schema_version: str = ARTIFACT_SCHEMA_VERSION
 
     def __post_init__(self) -> None:
         if self.schema_version != ARTIFACT_SCHEMA_VERSION:
             raise ValueError(f"unsupported planner artifact {self.schema_version!r}")
+        if self.target_definition_version != TARGET_DEFINITION_VERSION:
+            raise ValueError("unsupported probe target definitions; refit the artifact probes")
+        validate_planner_controls(self.planner_controls, _default_planner_controls())
         if len(self.normalization.obs_mean) != self.model.obs_dim:
             raise ValueError("observation normalizer does not match model.obs_dim")
         if len(self.normalization.action_mean) != self.model.action_dim:
@@ -371,22 +386,11 @@ class PlannerArtifact:
             "normalization": self.normalization.to_dict(),
             "probe": self.probe.to_dict(),
             "probe_evidence": self.probe_evidence.to_dict(),
-            "cem": {
-                name: getattr(self.cem, name)
-                for name in (
-                    "horizon",
-                    "action_dim",
-                    "samples",
-                    "elites",
-                    "iterations",
-                    "alpha",
-                    "min_probability",
-                    "plan_hold",
-                    "seed",
-                )
-            },
+            "cem": asdict(self.cem),
             "mode_weight_presets": self.mode_weight_presets,
             "normalize_attribute_scale": self.normalize_attribute_scale,
+            "planner_controls": dict(self.planner_controls),
+            "target_definition_version": self.target_definition_version,
         }
 
     @classmethod
@@ -400,7 +404,11 @@ class PlannerArtifact:
             "cem",
             "mode_weight_presets",
             "normalize_attribute_scale",
+            "planner_controls",
+            "target_definition_version",
         }
+        if payload.get("schema_version") != ARTIFACT_SCHEMA_VERSION:
+            raise ValueError("unsupported planner artifact; refit probes to produce a v4 bundle")
         _only(payload, allowed, "planner artifact")
         return cls(
             schema_version=str(payload.get("schema_version", "")),
@@ -410,7 +418,9 @@ class PlannerArtifact:
             probe_evidence=ProbeEvidenceContract.from_dict(payload["probe_evidence"]),
             cem=_cem_from_dict(payload["cem"]),
             mode_weight_presets=dict(payload.get("mode_weight_presets", {})),
-            normalize_attribute_scale=bool(payload.get("normalize_attribute_scale", True)),
+            normalize_attribute_scale=bool(payload["normalize_attribute_scale"]),
+            planner_controls=dict(payload["planner_controls"]),
+            target_definition_version=str(payload["target_definition_version"]),
         )
 
 

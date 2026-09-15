@@ -8,7 +8,7 @@ executed experiment.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
@@ -138,30 +138,19 @@ class PlannerRecipe:
                 raise ValueError(f"planner preset {name!r} must define every probe attribute")
 
     def representation_config(self) -> dict[str, Any]:
-        """Return planner controls in the public representation configuration shape."""
+        """Return all runtime controls in the public representation shape."""
 
         return {
-            "horizon": self.cem.horizon,
-            "samples": self.cem.samples,
-            "elites": self.cem.elites,
-            "iterations": self.cem.iterations,
-            "alpha": self.cem.alpha,
-            "min_probability": self.cem.min_probability,
-            "plan_hold": self.cem.plan_hold,
-            "seed": self.cem.seed,
-            "reserve_soc": self.reserve_soc,
-            "comms_soc_floor": self.comms_soc_floor,
+            **{key: value for key, value in asdict(self.cem).items() if key != "action_dim"},
             "normalize_attribute_scale": self.normalize_attribute_scale,
-            "downlink_reflex": self.downlink_reflex,
-            "exact_analytic_shaping": self.exact_analytic_shaping,
-            "lightweight_shaping": self.lightweight_shaping,
-            "contact_guidance": self.contact_guidance,
-            "contact_guidance_strength": self.contact_guidance_strength,
-            "undeliverable_capacity_penalty": self.undeliverable_capacity_penalty,
-            "downlink_reward": self.downlink_reward,
-            "pass_stage_reward": self.pass_stage_reward,
-            "downlink_shaping_reference_weight": self.downlink_shaping_reference_weight,
+            **self.policy_config(),
         }
+
+    def policy_config(self) -> dict[str, Any]:
+        """Export deployment controls bound alongside CEM in the artifact."""
+
+        excluded = {"artifact_root", "cem", "normalize_attribute_scale", "mode_weight_presets"}
+        return {key: value for key, value in asdict(self).items() if key not in excluded}
 
 
 @dataclass(frozen=True)

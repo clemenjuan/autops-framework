@@ -203,3 +203,29 @@ def checkpoint_contract_kwargs(
         "best_validation_loss": float(evidence["best_validation_loss"]),
         "validation_history": _validation_history(evidence),
     }
+
+
+def validate_planner_controls(controls: Mapping[str, Any], defaults: Mapping[str, Any]) -> None:
+    """Validate a complete, portable set of canonical deployment controls."""
+
+    if set(controls) != set(defaults):
+        raise ValueError("planner_controls must contain every canonical policy control")
+    for name, value in controls.items():
+        if isinstance(defaults[name], bool):
+            if type(value) is not bool:
+                raise ValueError(f"planner control {name} must be boolean")
+        elif (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+        ):
+            raise ValueError(f"planner control {name} must be finite numeric")
+    if controls["exact_analytic_shaping"]:
+        raise ValueError("exact_analytic_shaping is unsupported")
+    for name in ("reserve_soc", "comms_soc_floor", "contact_guidance_strength"):
+        if not 0 <= controls[name] <= 1:
+            raise ValueError(f"planner control {name} must lie in [0, 1]")
+    if controls["downlink_shaping_reference_weight"] <= 0:
+        raise ValueError("downlink_shaping_reference_weight must be positive")
+    if controls["undeliverable_capacity_penalty"] < 0:
+        raise ValueError("undeliverable_capacity_penalty must be non-negative")

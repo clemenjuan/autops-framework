@@ -301,7 +301,7 @@ def test_mission_mask_applies_to_planning_and_repairs_held_actions() -> None:
     assert planner.diagnostics()["future_action_repair_rate"] == pytest.approx(1.0)
 
     anomaly_mask = planner.mission_action_mask(_state(health_status="payload_fault"))
-    assert set(np.flatnonzero(anomaly_mask)) == {0, 6}
+    assert set(np.flatnonzero(anomaly_mask)) == {6}
 
 
 def test_reflex_overrides_and_consumes_a_held_action() -> None:

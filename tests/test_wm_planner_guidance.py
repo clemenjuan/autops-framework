@@ -300,10 +300,8 @@ def test_projection_repairs_invalid_future_actions_and_propagates_battery() -> N
             "consumption": {
                 name: {"sun_w": 100.0, "eclipse_w": 100.0} for name in EVENTSAT_ACTIONS
             },
-            "generation_peak_w": 0.0,
-            "panel_efficiency_factor": 0.0,
-            "battery_capacity_wh": 70.0,
-            "charge_efficiency": 0.9,
+            "solar_panels": {"generation_peak_w": 0.0, "panel_efficiency_factor": 0.0},
+            "battery": {"capacity_wh": 70.0, "charge_efficiency": 0.9},
         },
     )
     requested = np.asarray([[observe, observe], [send, send]])
@@ -317,7 +315,7 @@ def test_projection_repairs_invalid_future_actions_and_propagates_battery() -> N
     np.testing.assert_array_equal(projection.repair_counts, [1, 2])
 
 
-def test_terminal_forced_flags_only_terminal_step_repairs() -> None:
+def test_candidate_repairs_are_not_environment_safety_overrides() -> None:
     observe = EVENTSAT_ACTIONS.index("payload_observe")
     send = EVENTSAT_ACTIONS.index("payload_send")
     charging = EVENTSAT_ACTIONS.index("charging")
@@ -328,10 +326,8 @@ def test_terminal_forced_flags_only_terminal_step_repairs() -> None:
             "consumption": {
                 name: {"sun_w": 100.0, "eclipse_w": 100.0} for name in EVENTSAT_ACTIONS
             },
-            "generation_peak_w": 0.0,
-            "panel_efficiency_factor": 0.0,
-            "battery_capacity_wh": 70.0,
-            "charge_efficiency": 0.9,
+            "solar_panels": {"generation_peak_w": 0.0, "panel_efficiency_factor": 0.0},
+            "battery": {"capacity_wh": 70.0, "charge_efficiency": 0.9},
         },
     )
     requested = np.asarray([[observe, observe], [send, charging]])
@@ -341,7 +337,7 @@ def test_terminal_forced_flags_only_terminal_step_repairs() -> None:
     )
 
     np.testing.assert_array_equal(projection.repair_counts, [1, 1])
-    np.testing.assert_array_equal(projection.terminal_forced, [True, False])
+    np.testing.assert_array_equal(projection.terminal_forced, [False, False])
 
 
 def test_pipeline_score_rejects_a_projection_from_another_candidate_bank() -> None:
@@ -366,3 +362,87 @@ def test_pipeline_score_rejects_a_projection_from_another_candidate_bank() -> No
             undeliverable_penalty=0.0,
             projection=projection,
         )
+
+
+@pytest.mark.parametrize("mode", EVENTSAT_ACTIONS)
+@pytest.mark.parametrize("condition", ["nominal", "anomaly", "critical", "settling"])
+def test_projected_command_matches_environment_transition(mode: str, condition: str) -> None:
+    from autops.config import expand_coordinate
+    from autops.missions.eventsat.env import EventSatEnvironment
+    from autops.missions.eventsat.physics import encode_vectors
+
+    config = expand_coordinate("eventsat/sas/ao/symb").mission_config
+    config["anomalies"]["probability_per_step"] = 0.0
+    env = EventSatEnvironment(config, max_steps=12, prefer_orekit=False)
+    env.reset(42)
+    if condition == "anomaly":
+        env.state.active_anomaly = "thermal_warning"
+        env.state.forced_safe_steps = 10
+    elif condition == "critical":
+        env.state.battery_soc = 0.19
+    elif condition == "settling":
+        env.state.previous_mode = "payload_observe"
+        env.state.transition_steps_remaining = 1
+    _, _, raw = encode_vectors(env.observe())
+    projection = project_executable_candidates(
+        raw, np.asarray([[EVENTSAT_ACTIONS.index(mode)]]), reserve_soc=0.5, comms_soc_floor=0.25
+    )
+    command = EVENTSAT_ACTIONS[projection.sequences[0, 0]]
+    transition = env.step({"eventsat_0": {"mode": command}})
+    predicted = projection.terminal_states[0]
+    assert predicted["current_mode"] == transition.info["resolved_mode"]
+    assert projection.terminal_forced[0] == transition.info["forced"]
+    assert predicted["battery_soc"] == pytest.approx(env.state.battery_soc)
+    assert predicted["previous_mode"] == env.state.previous_mode
+    assert predicted["transition_steps_remaining"] == env.state.transition_steps_remaining
+    for field, value in env.state.pipeline().items():
+        assert predicted.get(field, 0.0) == pytest.approx(value), field
+
+
+def test_identical_repaired_commands_receive_identical_analytical_scores() -> None:
+    projection = project_executable_candidates(
+        _state(),
+        np.asarray([[EVENTSAT_ACTIONS.index("payload_compress")], [0]]),
+        reserve_soc=0.5,
+        comms_soc_floor=0.25,
+    )
+    np.testing.assert_array_equal(projection.sequences, [[0], [0]])
+    attributes = analytical_candidate_attributes(projection, ("forced_mode_risk",))
+    np.testing.assert_array_equal(attributes, [[0.0], [0.0]])
+
+
+def test_projection_propagates_a_multi_step_candidate_like_truth() -> None:
+    from autops.config import expand_coordinate
+    from autops.missions.eventsat.env import EventSatEnvironment
+    from autops.missions.eventsat.physics import encode_vectors
+
+    config = expand_coordinate("eventsat/sas/ao/symb").mission_config
+    config["anomalies"]["probability_per_step"] = 0.0
+    rng = np.random.default_rng(83)
+    for requested in rng.integers(0, 7, size=(8, 24)):
+        env = EventSatEnvironment(config, max_steps=48, prefer_orekit=False)
+        env.reset(42)
+        _, _, raw = encode_vectors(env.observe())
+        projected = project_executable_candidates(
+            raw,
+            requested[None],
+            reserve_soc=0.5,
+            comms_soc_floor=0.25,
+        )
+        for index in projected.sequences[0]:
+            env.step({"eventsat_0": {"mode": EVENTSAT_ACTIONS[index]}})
+        terminal = projected.terminal_states[0]
+        assert terminal["battery_soc"] == pytest.approx(env.state.battery_soc)
+        for field, value in env.state.pipeline().items():
+            assert terminal.get(field, 0.0) == pytest.approx(value), field
+
+
+def test_executed_ground_override_updates_cem_history_and_invalidates_held_plan() -> None:
+    planner = _planner(plan_hold=3)
+    state = _state(obs25=np.zeros(25), battery_soc=0.8)
+    planner.select_action(DecisionContext(state, {}, None, 0, role="onboard"))
+    different = "payload_send" if planner._last_action != 4 else "charging"
+    planner.update({"info": {"requested_mode": different}})
+    assert np.argmax(planner._action_history[-1]) == EVENTSAT_ACTIONS.index(different)
+    assert not planner._held_actions
+    assert planner._previous_solution is None

@@ -55,6 +55,7 @@ def _run_episode(spec: ExperimentSpec, episode_id: int, seed: int) -> dict[str, 
         "metrics": metrics,
         "provenance": {
             "target_count": len(env.target_ids),
+            "orbital_backend": env.config["orbit"]["propagator"],
             "support_cut_count": env.support_cut_count,
         },
     }

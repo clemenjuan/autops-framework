@@ -32,4 +32,4 @@ class FixedMemory:
         self._history.append(dict(item))
 
     def recent(self, count: int = 10) -> tuple[dict[str, Any], ...]:
-        return tuple(list(self._history)[-max(0, count) :])
+        return tuple(list(self._history)[-count:]) if count > 0 else ()

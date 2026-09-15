@@ -45,7 +45,12 @@ def custody_ceiling(
     custody_tau_steps: int,
     max_steps: int,
 ) -> float:
-    """Optimistic time-averaged delivered-custody upper bound."""
+    """Bound post-transition custody with instantaneous global sensing/delivery.
+
+    Every active pass step can deliver the freshest visible record. Processing,
+    pointing, relay delays and byte budgets are relaxed, so this remains an
+    upper bound; age uses the same end-of-step clock as ``EpisodeStats``.
+    """
 
     if target_count <= 0 or max_steps <= 0:
         return 0.0
@@ -55,11 +60,14 @@ def custody_ceiling(
         visible_by_step.setdefault(step, set()).update(
             str(object_id) for object_id in item.get("visible_target_ids", [])
         )
-    pass_starts = {
-        int(window["start_step"])
+    contact_steps = {
+        step
         for window in pass_windows
         if "start_step" in window
-        and int(window.get("end_step", window["start_step"])) >= int(window["start_step"])
+        for step in range(
+            max(0, int(window["start_step"])),
+            min(max_steps, int(window.get("end_step", window["start_step"])) + 1),
+        )
     }
     latest_visible: dict[str, int] = {}
     latest_ground: dict[str, int] = {}
@@ -68,9 +76,9 @@ def custody_ceiling(
     for step in range(max_steps):
         for object_id in visible_by_step.get(step, set()):
             latest_visible[object_id] = step
-        if step in pass_starts:
+        if step in contact_steps:
             latest_ground.update(latest_visible)
-        fresh = sum(1 for observed in latest_ground.values() if step - observed <= tau)
+        fresh = sum(1 for observed in latest_ground.values() if step + 1 - observed <= tau)
         cumulative += min(fresh, target_count) / target_count
     return cumulative / max_steps
 

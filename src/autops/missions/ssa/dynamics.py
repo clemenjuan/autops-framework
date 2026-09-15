@@ -32,9 +32,9 @@ def resolve_actions(
     information: dict[str, dict[str, Any]] = {}
     settling_steps = max(
         0,
-        int(float(env.config["transitions"]["settling_time_s"]) / env.timestep_s),
+        int(float(env.config["modes"]["transition_overhead"]["settling_time_s"]) / env.timestep_s),
     )
-    attitude_modes = set(env.config["transitions"]["attitude_modes"])
+    attitude_modes = set(env.config["modes"]["transition_overhead"]["attitude_maneuver_modes"])
     for satellite_id, requested_mode in requested.items():
         runtime = env.satellites[satellite_id]
         logical_mode = _resolve_physical_gate(env, runtime, requested_mode)
@@ -80,8 +80,8 @@ def apply_power(
     per_satellite: dict[str, dict[str, Any]],
 ) -> None:
     power = env.config["power"]
-    capacity_wh = float(power["battery_capacity_wh"])
-    charge_efficiency = float(power.get("charge_efficiency", 0.9))
+    capacity_wh = float(power["battery"]["capacity_wh"])
+    charge_efficiency = float(power["battery"]["charge_efficiency"])
     for satellite_id, mode in modes.items():
         runtime = env.satellites[satellite_id]
         position = env.satellite_position(satellite_id, epoch_s)
@@ -92,7 +92,11 @@ def apply_power(
         if mode == "isl_share":
             load_w += float(env.config["isl"]["power_overhead_w"])
         generation_w = (
-            float(power["solar_generation_w"]) * charge_efficiency if in_sunlight else 0.0
+            float(power["solar_panels"]["generation_peak_w"])
+            * float(power["solar_panels"]["panel_efficiency_factor"])
+            * charge_efficiency
+            if in_sunlight
+            else 0.0
         )
         duration_h = env.timestep_s / 3600.0
         previous_soc = runtime.battery_soc
@@ -122,10 +126,10 @@ def collective_reward(
     modes: dict[str, str],
     per_satellite: dict[str, dict[str, Any]],
 ) -> float:
-    reward_config = env.config["reward"]
+    reward_config = env.config["ssa"]
     target_count = len(env.target_ids)
     custody_fraction = len(env.custody_object_ids) / target_count if target_count else 0.0
-    mission_scale = float(reward_config["mission_scale"])
+    mission_scale = float(reward_config["collective_weight"])
     mission = (
         -mission_scale * (1.0 - custody_fraction)
         if bool(reward_config["collective_negative"])
@@ -142,10 +146,12 @@ def collective_reward(
 
 
 def _resolve_physical_gate(env: SSAEnvironment, runtime: Any, requested: str) -> str:
-    if runtime.health != "nominal" or runtime.battery_soc <= float(env.config["power"]["min_soc"]):
+    if runtime.health != "nominal" or runtime.battery_soc <= float(
+        env.config["power"]["battery"]["min_soc"]
+    ):
         return "safe"
-    minimum_soc = 0.3
-    if requested in {"payload_observe", "payload_detect"} and runtime.battery_soc < minimum_soc:
+    constraint = env.config["modes"]["constraints"].get(requested, {})
+    if runtime.battery_soc < float(constraint.get("min_battery_soc", 0.0)):
         return "charging"
     if requested == "isl_share" and runtime.battery_soc < float(env.config["ssa"]["isl_min_soc"]):
         return "charging"

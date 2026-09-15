@@ -25,9 +25,9 @@ def test_discovery_ceiling_requires_visibility_before_the_final_pass() -> None:
 def test_custody_ceiling_is_delivered_to_ground_and_time_averaged() -> None:
     passes = [{"satellite_id": "sat_0", "start_step": 2, "end_step": 2}]
     visibility = [{"step": 1, "visible_target_ids": ["a"]}]
-    # At step two, the latest visible record reaches ground. It is fresh for
-    # step 2 only when tau is one, so the six-step utility is 1/6.
-    assert custody_ceiling(passes, visibility, 1, 1, 6) == pytest.approx(1.0 / 6.0)
+    # Action step 2 is measured at clock 3: a record from step 1 has age 2.
+    assert custody_ceiling(passes, visibility, 1, 1, 6) == 0.0
+    assert custody_ceiling(passes, visibility, 1, 2, 6) == pytest.approx(1.0 / 6.0)
     assert custody_ceiling(passes, visibility, 0, 1, 6) == 0.0
 
 

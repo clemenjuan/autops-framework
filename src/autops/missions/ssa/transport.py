@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 
 
 def contact_seconds(env: SSAEnvironment, satellite_id: str, start_s: float) -> float:
-    ground = env.config["ground_station"]
+    ground = env.config["communications"]["ground_station"]
     return ground_contact_seconds(
         env.satellite_position,
         satellite_id,
@@ -57,7 +57,7 @@ def published_isl_pairs(env: SSAEnvironment) -> list[list[str]]:
 
 
 def ground_pass_windows(env: SSAEnvironment) -> list[dict[str, Any]]:
-    if bool(env.config["ground_station"]["always_visible"]):
+    if bool(env.config["communications"]["ground_station"]["always_visible"]):
         return [
             {"satellite_id": satellite_id, "start_step": step, "end_step": step}
             for step in range(env.max_steps)
@@ -205,7 +205,21 @@ def apply_ground_downlinks(
         ):
             continue
         runtime = env.satellites[satellite_id]
-        for object_id, record in runtime.undelivered.items():
+        budget = (
+            float(env.config["communications"]["xband"]["downlink_rate_kbps"])
+            * 1000.0
+            / 8.0
+            * float(info["contact_seconds"])
+        )
+        delivered = 0
+        for object_id in sorted(
+            runtime.undelivered, key=lambda key: record_step(runtime.undelivered[key])
+        ):
+            if budget < env.record_size_bytes:
+                break
+            record = runtime.undelivered.pop(object_id)
+            budget -= env.record_size_bytes
+            delivered += 1
             if not env.ground_archive[object_id]:
                 env.stats.record_first_delivery(
                     object_id,
@@ -213,8 +227,7 @@ def apply_ground_downlinks(
                     int(record.get("relay_hops", 0)),
                 )
             env.ground_archive[object_id].append(deepcopy(record))
-        info["downlinked_records"] = len(runtime.undelivered)
-        runtime.undelivered = {}
+        info["downlinked_records"] = delivered
         contacts.append(satellite_id)
 
     freshest = env._freshest_ground_steps()

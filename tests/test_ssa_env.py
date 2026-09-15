@@ -24,19 +24,19 @@ def _config(
         "simulation": {"timestep_s": 60.0, "max_steps": steps},
         "constellation": {
             "size": satellites,
+            "share_plane": False,
             "fixed_positions_km": fixed_satellites,
         },
-        "orbit": {"prefer_orekit": False},
         "targets": {
             "fixed_positions_km": {"visible": [7_000.0, -10.0, 0.0]},
             "fov_half_angle_deg": 2.0,
             "boresight_pitch_deg": 0.0,
-            "range_cap_km": 100.0,
-            "magnitude_limit": 100.0,
+            "r_cap_km": 100.0,
+            "m_lim": 100.0,
         },
         "payload": {"detection_time_s": 60.0},
-        "transitions": {"settling_time_s": 0.0},
-        "ground_station": {"always_visible": always_visible},
+        "modes": {"transition_overhead": {"settling_time_s": 0.0}},
+        "communications": {"ground_station": {"always_visible": always_visible}},
     }
 
 
@@ -281,9 +281,10 @@ def test_shared_plane_cache_is_trace_equivalent_to_dynamic_path() -> None:
         assert cached_result.reward == dynamic_result.reward
         assert cached_result.done == dynamic_result.done
         assert json.dumps(cached_result.info).encode() == json.dumps(dynamic_result.info).encode()
-        assert json.dumps(cached_result.observation).encode() == json.dumps(
-            dynamic_result.observation
-        ).encode()
+        assert (
+            json.dumps(cached_result.observation).encode()
+            == json.dumps(dynamic_result.observation).encode()
+        )
     assert cached.episode_metrics() == dynamic.episode_metrics()
 
 
@@ -320,3 +321,74 @@ def test_custody_uses_record_age_not_delivery_age(sunlit_geometry: None) -> None
     env.current_step = 2
     assert env.delivered_object_ids == {"visible"}
     assert env.custody_object_ids == set()
+
+
+def test_canonical_mission_overrides_reach_ssa_physics(sunlit_geometry: None) -> None:
+    from autops.config import expand_coordinate
+
+    spec = expand_coordinate(
+        "ssa/sas/ao/symb",
+        steps=1,
+        constellation_size=1,
+        overrides={
+            "mission": {
+                "power": {"battery": {"capacity_wh": 30.0, "initial_soc": 0.4}},
+                "communications": {"ground_station": {"latitude_deg": 0.0}},
+                "targets": {"r_cap_km": 5.0, "sigma_dv_along_ms": 1.0},
+                "modes": {"transition_overhead": {"settling_time_s": 0.0}},
+            }
+        },
+    )
+    config = _config(steps=1)
+    from autops.config import deep_merge
+
+    config = deep_merge(spec.mission_config, config)
+    config["targets"]["r_cap_km"] = spec.mission_config["targets"]["r_cap_km"]
+    env = SSAEnvironment(config)
+    env.reset(4)
+    assert env.target_ids == []  # The target at 10 km is outside the configured 5 km gate.
+    assert env.satellites["sat_0"].battery_soc == 0.4
+    assert env.config["power"]["battery"]["capacity_wh"] == 30.0
+    assert env.config["communications"]["ground_station"]["latitude_deg"] == 0.0
+    transition = env.step({"sat_0": {"mode": "communication"}})
+    info = transition.info["per_satellite"]["sat_0"]
+    assert not info["in_transition"]
+    assert info["battery_soc"] != 0.4
+    with pytest.raises(ValueError, match="Unknown mission override"):
+        SSAEnvironment({"power": {"battery_capacity_wh": 30.0}})
+
+
+def test_late_detection_during_continuous_pass_stays_below_custody_ceiling(
+    sunlit_geometry: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    env = SSAEnvironment(_config(steps=10))
+    original = env._accesses
+    monkeypatch.setattr(
+        env,
+        "_accesses",
+        lambda sat, time, positions, **kw: (
+            [] if time == 0 else original(sat, time, positions, **kw)
+        ),
+    )
+    env.reset(4)
+    for mode in ["charging", "payload_observe", "payload_detect", "communication"] + [
+        "charging"
+    ] * 6:
+        env.step({"sat_0": {"mode": mode}})
+    assert env.metrics()["ssa_custody_utility"] == pytest.approx(0.7)
+    assert env.physical_utility_ceiling >= env.metrics()["ssa_custody_utility"]
+
+
+def test_ssa_ground_link_retains_records_exceeding_byte_budget(sunlit_geometry: None) -> None:
+    config = _config()
+    # Half a 10 KiB record per 60 s pass step: no partial-record delivery.
+    config["communications"]["xband"] = {"downlink_rate_kbps": 10 * 1024 * 8 / 60 / 1000 / 2}
+    env = SSAEnvironment(config)
+    env.reset(4)
+    env.step({"sat_0": {"mode": "payload_observe"}})
+    env.step({"sat_0": {"mode": "payload_detect"}})
+    result = env.step({"sat_0": {"mode": "communication"}})
+    assert result.info["per_satellite"]["sat_0"]["downlinked_records"] == 0
+    assert "visible" in env.satellites["sat_0"].undelivered
+    assert not env.ground_archive["visible"]

@@ -72,3 +72,20 @@ def test_hmas_branching_one_is_finite_and_independent() -> None:
 def test_unknown_organisation_fails_closed() -> None:
     with pytest.raises(ValueError, match="unknown organisation"):
         create_organisation("unknown")
+
+
+def test_decentralised_memory_cannot_recover_remote_truth_after_step() -> None:
+    state = observation(linked=False)
+    controller = create_organisation("imas")
+    controller.reset(4, state)
+    controller.act(state)
+    next_state = observation(linked=True)
+    next_state["satellites"]["sat_0"]["battery_soc"] = 0.1
+    controller.after_step({"global_truth": "unavailable"}, next_state)
+    record = controller.memories["sat_0"].recent(1)[0]
+    remembered = record["observation"]
+    assert set(remembered["satellites"]) == {"sat_0"}
+    assert remembered["satellites"]["sat_0"]["battery_soc"] == 0.9
+    assert "ssa_custody_utility" not in remembered["global"]
+    assert "info" not in record
+    assert controller.memories["sat_0"].recent(0) == ()

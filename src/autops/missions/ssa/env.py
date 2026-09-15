@@ -75,7 +75,7 @@ class SSAEnvironment:
         self.current_step = 0
         self.stats = EpisodeStats()
         self._build_episode_geometry()
-        initial_soc = float(self.config["power"]["initial_soc"])
+        initial_soc = float(self.config["power"]["battery"]["initial_soc"])
         self.satellites = {
             satellite_id: SatelliteRuntime(
                 satellite_id=satellite_id,
@@ -336,9 +336,9 @@ class SSAEnvironment:
             parent_altitude_km=float(target_config["parent_altitude_km"]),
             parent_inclination_deg=float(target_config["parent_inclination_deg"]),
             raan_spread_deg=float(target_config["raan_spread_deg"]),
-            along_track_sigma_ms=float(target_config["along_track_sigma_ms"]),
-            normal_sigma_ms=float(target_config["normal_sigma_ms"]),
-            size_bounds_m=tuple(target_config["size_bounds_m"]),
+            along_track_sigma_ms=float(target_config["sigma_dv_along_ms"]),
+            normal_sigma_ms=float(target_config["sigma_dv_normal_ms"]),
+            size_bounds_m=tuple(target_config["size_power_law_bounds_m"]),
         )
         if fixed:
             self.targets = [
@@ -419,8 +419,8 @@ class SSAEnvironment:
             sun_unit_eci(epoch_s),
             fov_half_angle_deg=float(target_config["fov_half_angle_deg"]),
             boresight_pitch_deg=float(target_config["boresight_pitch_deg"]),
-            range_cap_km=float(target_config["range_cap_km"]),
-            magnitude_limit=float(target_config["magnitude_limit"]),
-            magnitude_sigma=float(target_config["magnitude_sigma"]),
+            range_cap_km=float(target_config["r_cap_km"]),
+            magnitude_limit=float(target_config["m_lim"]),
+            magnitude_sigma=float(target_config["sigma_m"]),
             albedo=float(target_config["albedo"]),
         )

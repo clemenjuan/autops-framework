@@ -68,12 +68,14 @@ class OrganisationController:
     config: dict[str, Any] = field(default_factory=dict)
     policies: dict[str, RuleBasedSSA] = field(default_factory=dict, init=False)
     memories: dict[str, FixedMemory] = field(default_factory=dict, init=False)
+    _pending_records: dict[str, dict[str, Any]] = field(default_factory=dict, init=False)
     coordination_messages: int = field(default=0, init=False)
     command_staleness: dict[str, int] = field(default_factory=dict, init=False)
 
     def reset(self, seed: int, observation: dict[str, Any]) -> None:
         self.policies = {}
         self.memories = {}
+        self._pending_records = {}
         self.coordination_messages = 0
         self.command_staleness = {
             satellite_id: 0 for satellite_id in observation.get("satellites", {})
@@ -91,7 +93,7 @@ class OrganisationController:
     def _plan(self, agent_id: str, observation: dict[str, Any]) -> dict[str, Any]:
         policy = self._policy(agent_id)
         encoded = policy.encode_observation(observation)
-        return policy.select_action(
+        action = policy.select_action(
             DecisionContext(
                 state=encoded,
                 observation=observation,
@@ -101,14 +103,18 @@ class OrganisationController:
                 metadata={"organisation_agent": agent_id},
             )
         )
+        self._pending_records[agent_id] = deepcopy({"observation": observation, "action": action})
+        return action
 
     def act(self, observation: dict[str, Any]) -> dict[str, Any]:
         raise NotImplementedError
 
     def after_step(self, info: dict[str, Any], observation: dict[str, Any]) -> None:
-        record = {"info": info, "observation": observation}
-        for memory in self.memories.values():
-            memory.record(record)
+        # Preserve exactly the information delivered to each decision loop.
+        # Truth telemetry at the next step is not a free coordination channel.
+        for agent_id, record in self._pending_records.items():
+            self.memories[agent_id].record(record)
+        self._pending_records.clear()
 
     def metrics(self) -> dict[str, float]:
         staleness = list(self.command_staleness.values())
@@ -122,7 +128,9 @@ class SingleAgent(OrganisationController):
     """One decision loop coordinates the complete constellation."""
 
     def act(self, observation: dict[str, Any]) -> dict[str, Any]:
-        return self._plan("single_agent", observation)
+        return self._plan(
+            "single_agent", scope_observation(observation, list(observation["satellites"]))
+        )
 
 
 class IndependentAgents(OrganisationController):

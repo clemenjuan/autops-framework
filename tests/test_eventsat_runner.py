@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import replace
+from types import SimpleNamespace
 
 import pytest
 
@@ -63,6 +64,8 @@ def test_refresh_almanac_updates_clock_without_truth_or_resource_leaks() -> None
                 "status": "charging",
                 "resources": {"battery_soc": 0.4},
                 "metadata": {
+                    "planning_contact_seconds": [0.0, 0.0],
+                    "planning_sunlight": [False, False],
                     "time_to_next_pass": 88.0,
                     "following_gap_steps": 90.0,
                     "future_pass_capacity_mb": 1.0,
@@ -80,6 +83,8 @@ def test_refresh_almanac_updates_clock_without_truth_or_resource_leaks() -> None
                 "status": "safe",
                 "resources": {"battery_soc": 0.9},
                 "metadata": {
+                    "planning_contact_seconds": [20.0, 0.0],
+                    "planning_sunlight": [True, True],
                     "time_to_next_pass": 0.0,
                     "following_gap_steps": 71.0,
                     "future_pass_capacity_mb": 2.5,
@@ -96,6 +101,8 @@ def test_refresh_almanac_updates_clock_without_truth_or_resource_leaks() -> None
     assert again["satellites"]["eventsat_0"]["metadata"]["staleness_steps"] == 21
     assert refreshed["step"] == 20
     assert refreshed["epoch_s"] == 1_200.0
+    assert satellite["metadata"]["planning_contact_seconds"] == [20.0, 0.0]
+    assert satellite["metadata"]["planning_sunlight"] == [True, True]
     assert satellite["metadata"]["time_to_next_pass"] == 0.0
     assert satellite["metadata"]["following_gap_steps"] == 71.0
     assert satellite["metadata"]["future_pass_capacity_mb"] == 2.5
@@ -230,3 +237,30 @@ def test_invalid_commands_cannot_bypass_mandatory_safety(condition: str) -> None
     assert outcome.info["safety_resolved_mode"] == "safe"
     assert outcome.info["forced"]
     assert outcome.info["safety_safe"] == 1.0
+
+
+@pytest.mark.parametrize("horizon", [36, 48, 72, 96])
+def test_runner_covers_effective_cem_horizon_and_terminal_settling(monkeypatch, horizon) -> None:
+    spec = expand_coordinate("eventsat/sas/ao/symb", steps=160)
+    runner = ExperimentRunner(spec, save=False, prefer_orekit=False)
+    paradigm = runner._build_paradigm()
+    paradigm.onboard.cem = SimpleNamespace(horizon=horizon)
+    monkeypatch.setattr(runner, "_build_paradigm", lambda: paradigm)
+    env, actual_paradigm = runner._build_eventsat_components()
+    env.reset(42)
+    env.orbit = replace(
+        env.orbit,
+        ground_passes=(GroundPass(60 * horizon, 60 * (horizon + 1), 45.0, 0.375),),
+    )
+    metadata = env.observe()["satellites"]["eventsat_0"]["metadata"]
+    assert actual_paradigm is paradigm
+    assert len(metadata["planning_contact_seconds"]) >= horizon + env.settling_steps + 1
+    assert len(metadata["planning_sunlight"]) == len(metadata["planning_contact_seconds"])
+    assert metadata["planning_contact_seconds"][horizon] == pytest.approx(60.0)
+
+
+@pytest.mark.parametrize("horizon", [-1, True, 2.5])
+def test_environment_rejects_invalid_planning_horizon(horizon) -> None:
+    config = expand_coordinate("eventsat/sas/ao/symb").mission_config
+    with pytest.raises(ValueError, match="planning_horizon"):
+        EventSatEnvironment(config, planning_horizon=horizon)

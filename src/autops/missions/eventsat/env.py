@@ -49,6 +49,7 @@ class EventSatEnvironment:
         onboard_compute_active: bool = False,
         anomaly_requires_ground_pass: bool = False,
         prefer_orekit: bool = True,
+        planning_horizon: int = 0,
     ) -> None:
         self.config = config
         self.timestep_s = float(config["simulation"]["timestep_s"])
@@ -61,6 +62,12 @@ class EventSatEnvironment:
         )
         transition = config["modes"]["transition_overhead"]
         self.settling_steps = max(0, int(float(transition["settling_time_s"]) / self.timestep_s))
+        if isinstance(planning_horizon, bool) or not isinstance(planning_horizon, int):
+            raise ValueError("planning_horizon must be a non-negative integer")
+        if planning_horizon < 0:
+            raise ValueError("planning_horizon must be a non-negative integer")
+        # Candidate feasibility also inspects contacts after the final action.
+        self.planning_lookahead_steps = max(48, planning_horizon + self.settling_steps + 1)
         self.maneuver_modes = set(transition["attitude_maneuver_modes"])
         self.detection_steps = max(
             1, int(float(config["payload"]["detection_time_s"]) / self.timestep_s)

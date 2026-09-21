@@ -16,6 +16,7 @@ from autops.missions.eventsat.metrics import METRIC_IDS, EventSatMetrics, experi
 from autops.paradigms.ag import AutonomousGround
 from autops.paradigms.ah import AutonomousHybrid
 from autops.paradigms.ao import AutonomousOnboard
+from autops.paradigms.base import Paradigm
 from autops.paradigms.cg import ConventionalGround
 
 
@@ -38,14 +39,7 @@ class ExperimentRunner:
         return result
 
     def _run_eventsat_episode(self, episode_id: int, seed: int) -> dict[str, Any]:
-        env = EventSatEnvironment(
-            self.spec.mission_config,
-            max_steps=self.spec.steps,
-            onboard_compute_active=self.spec.onboard_uses_jetson,
-            anomaly_requires_ground_pass=self.spec.paradigm in {"ag", "conventional"},
-            prefer_orekit=self.prefer_orekit,
-        )
-        paradigm = self._build_paradigm()
+        env, paradigm = self._build_eventsat_components()
         observation = env.reset(seed)
         paradigm.reset(seed, observation)
         collector = EventSatMetrics(
@@ -91,7 +85,25 @@ class ExperimentRunner:
                 diagnostics[role] = collect()
         return diagnostics
 
-    def _build_paradigm(self):
+    def _build_eventsat_components(self) -> tuple[EventSatEnvironment, Paradigm]:
+        """Share the effective planner's forecast requirements with trace export."""
+
+        paradigm = self._build_paradigm()
+        searches = (
+            getattr(getattr(paradigm, role, None), "cem", None) for role in ("onboard", "ground")
+        )
+        horizon = max((search.horizon for search in searches if search is not None), default=0)
+        env = EventSatEnvironment(
+            self.spec.mission_config,
+            max_steps=self.spec.steps,
+            onboard_compute_active=self.spec.onboard_uses_jetson,
+            anomaly_requires_ground_pass=self.spec.paradigm in {"ag", "conventional"},
+            prefer_orekit=self.prefer_orekit,
+            planning_horizon=horizon,
+        )
+        return env, paradigm
+
+    def _build_paradigm(self) -> Paradigm:
         memory = FixedMemory()
         rep_config = dict(self.spec.representation_config)
         if self.spec.paradigm == "ao":

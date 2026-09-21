@@ -12,7 +12,6 @@ from autops.config import ExperimentSpec, asset_root, runtime_root
 from autops.core.provenance import collect_provenance
 from autops.core.runner import ExperimentRunner
 from autops.core.ssa_runner import _episode_config, _organisation_config
-from autops.missions.eventsat.env import EventSatEnvironment
 from autops.missions.eventsat.physics import MODES as EVENTSAT_MODES
 from autops.missions.eventsat.physics import encode_vectors
 from autops.missions.ssa.env import SSAEnvironment
@@ -58,14 +57,9 @@ def _eventsat_trace(spec: ExperimentSpec, prefer_orekit: bool) -> TraceDataset:
     episode_rows: list[dict[str, list[Any]]] = []
     orbital_backends: set[str] = set()
     for seed in spec.seeds:
-        env = EventSatEnvironment(
-            spec.mission_config,
-            max_steps=spec.steps,
-            onboard_compute_active=spec.onboard_uses_jetson,
-            anomaly_requires_ground_pass=spec.paradigm in {"ag", "conventional"},
-            prefer_orekit=prefer_orekit,
-        )
-        paradigm = ExperimentRunner(spec, save=False, prefer_orekit=prefer_orekit)._build_paradigm()
+        env, paradigm = ExperimentRunner(
+            spec, save=False, prefer_orekit=prefer_orekit
+        )._build_eventsat_components()
         observation = env.reset(seed)
         backend = env.episode_provenance().get("orbital_backend")
         if not isinstance(backend, str):

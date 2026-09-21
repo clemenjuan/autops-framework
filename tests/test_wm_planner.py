@@ -148,7 +148,7 @@ def test_analytical_cem_scores_exact_projected_attributes_without_torch() -> Non
         observation_size_mb=9.41,
         jetson_capacity_mb=100.0,
         step_duration_s=60.0,
-        planning_contact_seconds=[0.0],
+        planning_contact_seconds=[0.0, 0.0],
         planning_sunlight=[True],
     )
 
@@ -185,7 +185,7 @@ def test_analytical_cem_shaping_scores_the_repaired_executable_bank() -> None:
         observation_size_mb=9.41,
         jetson_capacity_mb=100.0,
         step_duration_s=60.0,
-        planning_contact_seconds=[0.0],
+        planning_contact_seconds=[0.0, 0.0],
         planning_sunlight=[True],
     )
 

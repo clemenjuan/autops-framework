@@ -48,8 +48,9 @@ def contact_capacities(state: Mapping[str, Any], horizon: int) -> np.ndarray:
     scheduled = state.get("planning_contact_seconds")
     if isinstance(scheduled, (list, tuple, np.ndarray)):
         seconds = np.asarray(scheduled, dtype=np.float64).reshape(-1)
-        count = min(horizon, seconds.size)
-        capacities[:count] = np.maximum(0.0, seconds[:count]) * rate / 8000.0
+        if seconds.size < horizon:
+            raise ValueError("contact forecast does not cover the requested planning horizon")
+        capacities[:] = np.maximum(0.0, seconds[:horizon]) * rate / 8000.0
         return capacities
     cache = state.get("_analytic_orbit_cache")
     if isinstance(cache, Mapping):
@@ -181,9 +182,9 @@ def _planning_sunlight(state: Mapping[str, Any], horizon: int) -> np.ndarray:
     if not isinstance(scheduled, (list, tuple, np.ndarray)):
         return np.full(horizon, default, dtype=bool)
     values = np.asarray(scheduled, dtype=bool).reshape(-1)
-    if values.size >= horizon:
-        return values[:horizon]
-    return np.concatenate([values, np.full(horizon - values.size, default, dtype=bool)])
+    if values.size < horizon:
+        raise ValueError("sunlight forecast does not cover the requested planning horizon")
+    return values[:horizon]
 
 
 def _fallback(mask: np.ndarray, state: Mapping[str, Any]) -> int:

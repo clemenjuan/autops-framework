@@ -254,7 +254,7 @@ def test_projection_propagates_complete_pipeline_through_future_actions() -> Non
         jetson_raw_mb=9.41,
         uncompressed_observations=1,
         detection_time_steps=5,
-        planning_contact_seconds=[0.0] * 8 + [60.0],
+        planning_contact_seconds=[0.0] * 8 + [60.0, 0.0],
     )
     requested = np.asarray(
         [
@@ -446,3 +446,18 @@ def test_executed_ground_override_updates_cem_history_and_invalidates_held_plan(
     assert np.argmax(planner._action_history[-1]) == EVENTSAT_ACTIONS.index(different)
     assert not planner._held_actions
     assert planner._previous_solution is None
+
+
+@pytest.mark.parametrize("field", ["planning_contact_seconds", "planning_sunlight"])
+def test_projection_rejects_truncated_forecasts_instead_of_inventing_future(field) -> None:
+    state = _state(**{field: [0.0] * 48})
+    requested = np.full((1, 72), EVENTSAT_ACTIONS.index("charging"), dtype=np.int64)
+    with pytest.raises(ValueError, match="forecast does not cover"):
+        project_executable_candidates(state, requested, reserve_soc=0.5, comms_soc_floor=0.25)
+
+
+def test_projection_requires_contact_forecast_through_terminal_settling() -> None:
+    state = _state(planning_contact_seconds=[0.0] * 48, settling_time_steps=2)
+    requested = np.full((1, 48), EVENTSAT_ACTIONS.index("charging"), dtype=np.int64)
+    with pytest.raises(ValueError, match="contact forecast"):
+        project_executable_candidates(state, requested, reserve_soc=0.5, comms_soc_floor=0.25)

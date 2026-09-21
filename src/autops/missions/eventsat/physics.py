@@ -43,6 +43,9 @@ def settle_mode(
 ) -> tuple[str, str, int, bool]:
     """Return effective mode, pointing history, countdown, and transition flag."""
 
+    # Safety resolution is authoritative even while a maneuver is pending.
+    if resolved == "safe":
+        return "safe", "safe", 0, False
     if remaining > 0:
         remaining -= 1
         return "charging", resolved if remaining == 0 else previous, remaining, True

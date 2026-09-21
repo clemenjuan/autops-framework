@@ -365,7 +365,10 @@ def test_pipeline_score_rejects_a_projection_from_another_candidate_bank() -> No
 
 
 @pytest.mark.parametrize("mode", EVENTSAT_ACTIONS)
-@pytest.mark.parametrize("condition", ["nominal", "anomaly", "critical", "settling"])
+@pytest.mark.parametrize(
+    "condition",
+    ["nominal", "anomaly", "critical", "settling", "anomaly_settling", "critical_settling"],
+)
 def test_projected_command_matches_environment_transition(mode: str, condition: str) -> None:
     from autops.config import expand_coordinate
     from autops.missions.eventsat.env import EventSatEnvironment
@@ -375,12 +378,12 @@ def test_projected_command_matches_environment_transition(mode: str, condition: 
     config["anomalies"]["probability_per_step"] = 0.0
     env = EventSatEnvironment(config, max_steps=12, prefer_orekit=False)
     env.reset(42)
-    if condition == "anomaly":
+    if condition.startswith("anomaly"):
         env.state.active_anomaly = "thermal_warning"
         env.state.forced_safe_steps = 10
-    elif condition == "critical":
+    elif condition.startswith("critical"):
         env.state.battery_soc = 0.19
-    elif condition == "settling":
+    if condition.endswith("settling"):
         env.state.previous_mode = "payload_observe"
         env.state.transition_steps_remaining = 1
     _, _, raw = encode_vectors(env.observe())

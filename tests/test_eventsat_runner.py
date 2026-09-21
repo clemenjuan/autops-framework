@@ -264,3 +264,28 @@ def test_environment_rejects_invalid_planning_horizon(horizon) -> None:
     config = expand_coordinate("eventsat/sas/ao/symb").mission_config
     with pytest.raises(ValueError, match="planning_horizon"):
         EventSatEnvironment(config, planning_horizon=horizon)
+
+
+@pytest.mark.parametrize("condition", ["anomaly", "critical_battery"])
+@pytest.mark.parametrize("remaining", [0, 1, 2])
+def test_mandatory_safe_mode_preempts_attitude_settling(condition, remaining) -> None:
+    config = deepcopy(expand_coordinate("eventsat/sas/ao/symb").mission_config)
+    config["anomalies"]["probability_per_step"] = 0.0
+    env = EventSatEnvironment(config, max_steps=4, prefer_orekit=False)
+    env.reset(42)
+    env.state.previous_mode = "payload_observe"
+    env.state.transition_steps_remaining = remaining
+    if condition == "anomaly":
+        env.state.active_anomaly = "thermal_warning"
+        env.state.forced_safe_steps = 10
+    else:
+        env.state.battery_soc = 0.19
+    transition = env.step({"eventsat_0": {"mode": "payload_observe"}})
+    assert transition.info["resolved_mode"] == "safe"
+    assert transition.info["forced"]
+    assert not transition.info["in_transition"]
+    assert env.state.transition_steps_remaining == 0
+    assert env.state.previous_mode == "safe"
+    assert env.state.total_observation_s == 0.0
+    expected_load = config["power"]["consumption"]["safe"]["eclipse_w"]
+    assert transition.info["gross_energy_consumed_wh"] == pytest.approx(expected_load / 60.0)

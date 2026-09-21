@@ -125,7 +125,8 @@ compute events, whose measured cost is charged by the actual environment. These
 assumptions must accompany an analytical-reference claim.
 
 Candidate repair, physical settling, and environment safety overrides are distinct.
-Only safety resolution contributes to the projected forced flag. Probe-target v2 aligns
+Mandatory safe mode preempts and cancels any pending attitude settling, in both truth
+and candidate projection. Only safety resolution contributes to the projected forced flag. Probe-target v2 aligns
 that flag with the incoming transition: the label for state `s_t` uses the override from
 `a_(t-1)`, and reset has no override. Contact opportunity refers to the terminal state's
 physical or settling-lead contact window. The 25D trace schema and M-01…M-14 are unchanged.

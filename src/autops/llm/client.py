@@ -116,49 +116,76 @@ class LLMClient:
                     text=cached.text,
                 )
                 return cached.text
-            for attempt in range(self._retries + 1):
-                started = time.perf_counter()
-                try:
-                    text = self._call_provider(
-                        provider,
-                        system_prompt,
-                        user_prompt,
-                        actual_temperature,
-                        json_mode,
-                        attempt,
-                        actual_seed,
-                    )
-                    latency_s = time.perf_counter() - started
-                    self._total_latency_s += latency_s
-                    self._live_calls += 1
-                    self._providers_used.add(provider)
-                    if not text.strip():
-                        raise RuntimeError("provider returned an empty response")
-                    if self._cache_enabled:
-                        self._cache.put(key, CacheEntry(text, provider, self.model))
-                    self._log_decision(
-                        event="success",
-                        provider=provider,
-                        system_prompt=system_prompt,
-                        user_prompt=user_prompt,
-                        text=text,
-                        latency_s=latency_s,
-                    )
-                    return text
-                except Exception as exc:  # provider failures are summarized, not hidden
-                    failures.append(f"{provider}: {type(exc).__name__}: {exc}")
-                    self._log_decision(
-                        event="error",
-                        provider=provider,
-                        system_prompt=system_prompt,
-                        user_prompt=user_prompt,
-                        attempt=attempt + 1,
-                        error=f"{type(exc).__name__}: {exc}",
-                    )
-                    if attempt < self._retries and self._backoff_s:
-                        time.sleep(self._backoff_s * (2**attempt))
+            text = self._live_response(
+                provider,
+                key,
+                system_prompt,
+                user_prompt,
+                actual_temperature,
+                json_mode,
+                actual_seed,
+                failures,
+            )
+            if text is not None:
+                return text
         detail = "; ".join(failures) or "no configured provider is available"
         raise RuntimeError(f"LLM generation failed: {detail}")
+
+    def _live_response(
+        self,
+        provider: str,
+        key: str,
+        system_prompt: str,
+        user_prompt: str,
+        temperature: float,
+        json_mode: bool,
+        seed: int | None,
+        failures: list[str],
+    ) -> str | None:
+        """Request one provider with transport retries; record failures and return None."""
+
+        for attempt in range(self._retries + 1):
+            started = time.perf_counter()
+            try:
+                text = self._call_provider(
+                    provider,
+                    system_prompt,
+                    user_prompt,
+                    temperature,
+                    json_mode,
+                    attempt,
+                    seed,
+                )
+                latency_s = time.perf_counter() - started
+                self._total_latency_s += latency_s
+                self._live_calls += 1
+                self._providers_used.add(provider)
+                if not text.strip():
+                    raise RuntimeError("provider returned an empty response")
+                if self._cache_enabled:
+                    self._cache.put(key, CacheEntry(text, provider, self.model))
+                self._log_decision(
+                    event="success",
+                    provider=provider,
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    text=text,
+                    latency_s=latency_s,
+                )
+                return text
+            except Exception as exc:  # provider failures are summarized, not hidden
+                failures.append(f"{provider}: {type(exc).__name__}: {exc}")
+                self._log_decision(
+                    event="error",
+                    provider=provider,
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    attempt=attempt + 1,
+                    error=f"{type(exc).__name__}: {exc}",
+                )
+                if attempt < self._retries and self._backoff_s:
+                    time.sleep(self._backoff_s * (2**attempt))
+        return None
 
     def _log_decision(self, **fields: Any) -> None:
         """Append one human-inspectable JSON line per call; opt-in via llm_decision_log.

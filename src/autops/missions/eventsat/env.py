@@ -9,7 +9,7 @@ context follows Sellmaier et al. (2022), doi:10.1007/978-3-030-88593-9.
 from __future__ import annotations
 
 import random
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from autops.core.types import EnvironmentStep
@@ -184,6 +184,7 @@ class EventSatEnvironment:
                 or 0 < lookahead["time_to_next_pass"] <= self.settling_steps
             ),
             "health_status": "nominal" if state.active_anomaly is None else state.active_anomaly,
+            "navigation": self._navigation(),
             "previous_mode": state.previous_mode,
             "jetson_raw_mb": state.jetson_raw_mb,
             "jetson_compressed_mb": state.jetson_compressed_mb,
@@ -405,6 +406,23 @@ class EventSatEnvironment:
             "following_gap_steps": float(following_gap),
             "planning_gap_steps": float(next_gap),
             "future_pass_capacity_mb": capacity_s * self.downlink_rate_kbps / 8.0 / 1000.0,
+        }
+
+    def _navigation(self) -> dict[str, Any]:
+        """Ideal GNSS fix and present geometry at the current step start."""
+
+        track = self.orbit.navigation if self.orbit else None
+        if track is None:
+            return {"valid": False}
+        row = self.state.step
+        return {
+            "valid": True,
+            "utc": (track.epoch + timedelta(seconds=row * track.step_s)).isoformat(),
+            "frame": "ITRF/IERS-2010",
+            "position_km": track.position_km[row].tolist(),
+            "velocity_km_s": track.velocity_km_s[row].tolist(),
+            "sun_unit": track.sun_unit[row].tolist(),
+            "station_elevation_deg": float(track.station_elevation_deg[row]),
         }
 
     def _remaining_downlink_mb(self) -> float:

@@ -14,7 +14,7 @@ from autops.core.types import DecisionContext
 from autops.missions.eventsat.env import EventSatEnvironment
 from autops.missions.eventsat.metrics import METRIC_IDS
 from autops.missions.eventsat.physics import planner_event_energy_wh
-from autops.orbital import GroundPass
+from autops.orbital import GroundPass, orekit
 from autops.paradigms.base import ParadigmDecision, refresh_almanac
 from autops.representations.symb import EventSatSymbolicScheduler
 
@@ -30,6 +30,7 @@ def test_fallback_environment_uses_configured_physics() -> None:
     assert metadata["orbital_period_steps"] == 92
     assert metadata["settling_time_steps"] == 2
     assert not metadata["in_sunlight"]
+    assert metadata["navigation"] == {"valid": False}
     assert all(0.0 <= value <= 360.0 for value in env.state.orbit_elements.values())
 
     step = env.step({"eventsat_0": {"mode": "charging", "jetson_planned": False}})
@@ -312,3 +313,20 @@ def test_slew_keeps_initial_target_and_drops_commands_while_settling(redirect) -
         redirected = env.step({"eventsat_0": {"mode": "communication"}})
         assert redirected.info["in_transition"]
         assert redirected.info["resolved_mode"] == "charging"
+
+
+@pytest.mark.orekit
+def test_orekit_observation_carries_the_current_navigation_fix() -> None:
+    if not orekit.is_available():
+        pytest.skip("Orekit, Java 17, or orekit-data.zip is unavailable")
+    config = deepcopy(expand_coordinate("eventsat/sas/ag/symb").mission_config)
+    env = EventSatEnvironment(config, max_steps=3)
+    env.reset(42)
+    env.step({"eventsat_0": {"mode": "charging"}})
+    navigation = env.observe()["satellites"]["eventsat_0"]["metadata"]["navigation"]
+    track = env.orbit.navigation
+    assert navigation["valid"] and navigation["frame"] == "ITRF/IERS-2010"
+    assert navigation["utc"] == "2026-06-01T00:01:00+00:00"
+    assert navigation["position_km"] == track.position_km[1].tolist()
+    assert navigation["velocity_km_s"] == track.velocity_km_s[1].tolist()
+    assert navigation["station_elevation_deg"] == track.station_elevation_deg[1]

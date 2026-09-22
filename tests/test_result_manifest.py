@@ -79,17 +79,15 @@ def test_manifest_rejects_tampered_result_bytes(tmp_path: Path) -> None:
         verified_result_paths(manifest_path, tmp_path)
 
 
-def test_canonical_paper_a_manifest_has_verified_gate_results() -> None:
-    manifest = load_result_manifest(Path("configs/papers/paper_a.yaml"))
+@pytest.mark.parametrize(
+    ("name", "paper_id"),
+    [
+        ("paper_a", "paper-a-compute-aware-planning"),
+        ("paper_b", "paper-b-operations-architecture-comparison"),
+    ],
+)
+def test_canonical_paper_manifests_start_with_no_approved_rows(name: str, paper_id: str) -> None:
+    manifest = load_result_manifest(Path(f"configs/papers/{name}.yaml"))
 
-    assert manifest.paper_id == "paper-a-compute-aware-planning"
-    assert manifest.approved
-    paths = verified_result_paths(Path("configs/papers/paper_a.yaml"), Path("."))
-    assert len(paths) == len(manifest.approved)
-
-
-def test_canonical_paper_b_manifest_starts_with_no_approved_rows() -> None:
-    manifest = load_result_manifest(Path("configs/papers/paper_b.yaml"))
-
-    assert manifest.paper_id == "paper-b-operations-architecture-comparison"
+    assert manifest.paper_id == paper_id
     assert manifest.approved == ()

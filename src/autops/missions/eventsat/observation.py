@@ -21,6 +21,7 @@ from typing import Any
 
 import numpy as np
 
+from autops.missions.eventsat.transitions import record_number
 from autops.orbital import NavigationTrack
 from autops.wm.schema import EVENTSAT_ACTIONS as MODES
 from autops.wm.schema import EVENTSAT_OBSERVATIONS, EVENTSAT_STATES
@@ -114,13 +115,6 @@ def navigation_fix(track: NavigationTrack | None, step: int) -> dict[str, Any]:
     }
 
 
-def _number(raw: Mapping[str, Any], key: str, default: float = 0.0) -> float:
-    try:
-        return float(raw.get(key, default))
-    except (TypeError, ValueError):
-        return default
-
-
 def _ratio(value: float, denominator: float) -> float:
     return min(1.0, max(0.0, value / max(denominator, 1e-12)))
 
@@ -138,10 +132,10 @@ def _one_hot(prefix: str, mode: str) -> dict[str, float]:
 def _observation_values(raw: Mapping[str, Any]) -> dict[str, float]:
     navigation = raw.get("navigation") or {"valid": False}
     last = raw.get("last_interval") or idle_interval()
-    step_s = _number(raw, "step_duration_s", 60.0)
-    obc_capacity = _number(raw, "storage_capacity_mb", 4096.0)
-    jetson_capacity = _number(raw, "jetson_capacity_mb", 249036.8)
-    product_mb = max(1e-12, _number(raw, "observation_size_mb", 9.41))
+    step_s = record_number(raw, "step_duration_s", 60.0)
+    obc_capacity = record_number(raw, "storage_capacity_mb", 4096.0)
+    jetson_capacity = record_number(raw, "jetson_capacity_mb", 249036.8)
+    product_mb = max(1e-12, record_number(raw, "observation_size_mb", 9.41))
     log_capacity = math.log1p(max(1.0, jetson_capacity / product_mb))
     solar = (raw.get("planning_power") or {}).get("solar_panels", {})
     energy_scale = max(
@@ -181,26 +175,32 @@ def _observation_values(raw: Mapping[str, Any]) -> dict[str, float]:
         ),
         "station_visible": float(bool(raw.get("station_visible", False))),
         "in_sunlight": float(bool(raw.get("in_sunlight", False))),
-        "battery_soc": _number(raw, "battery_soc"),
-        "obc_fill": _ratio(_number(raw, "obc_data_mb"), obc_capacity),
-        "jetson_raw_fill": _ratio(_number(raw, "jetson_raw_mb"), jetson_capacity),
-        "jetson_compressed_fill": _ratio(_number(raw, "jetson_compressed_mb"), jetson_capacity),
+        "battery_soc": record_number(raw, "battery_soc"),
+        "obc_fill": _ratio(record_number(raw, "obc_data_mb"), obc_capacity),
+        "jetson_raw_fill": _ratio(record_number(raw, "jetson_raw_mb"), jetson_capacity),
+        "jetson_compressed_fill": _ratio(
+            record_number(raw, "jetson_compressed_mb"), jetson_capacity
+        ),
         "health_nominal": float(raw.get("health_status", "nominal") == "nominal"),
         "uncompressed_observations_log": math.log1p(
-            max(0.0, _number(raw, "uncompressed_observations"))
+            max(0.0, record_number(raw, "uncompressed_observations"))
         )
         / log_capacity,
         "compression_progress": _ratio(
-            _number(raw, "compression_progress"), _number(raw, "compression_time_factor", 2.0)
+            record_number(raw, "compression_progress"),
+            record_number(raw, "compression_time_factor", 2.0),
         ),
-        "undetected_observations_log": math.log1p(max(0.0, _number(raw, "undetected_observations")))
+        "undetected_observations_log": math.log1p(
+            max(0.0, record_number(raw, "undetected_observations"))
+        )
         / log_capacity,
         "detection_progress": _ratio(
-            _number(raw, "detection_progress"), _number(raw, "detection_time_steps", 5.0)
+            record_number(raw, "detection_progress"),
+            record_number(raw, "detection_time_steps", 5.0),
         ),
         "settling_remaining": _ratio(
-            _number(raw, "transition_steps_remaining"),
-            max(1.0, _number(raw, "settling_time_steps", 1.0)),
+            record_number(raw, "transition_steps_remaining"),
+            max(1.0, record_number(raw, "settling_time_steps", 1.0)),
         ),
         "last_forced_safe": float(resolved == "safe" and requested != "safe"),
         "last_forced_charging": float(resolved == "charging" and requested != "charging"),
@@ -210,11 +210,11 @@ def _observation_values(raw: Mapping[str, Any]) -> dict[str, float]:
         "last_detected": float(last["detections"] > 0),
         "last_obc_transfer_norm": _ratio(
             float(last["obc_transfer_mb"]),
-            _number(raw, "jetson_to_obc_rate_kbps", 8000.0) * step_s / 8000.0,
+            record_number(raw, "jetson_to_obc_rate_kbps", 8000.0) * step_s / 8000.0,
         ),
         "last_downlink_norm": _ratio(
             float(last["downlinked_mb"]),
-            _number(raw, "downlink_rate_kbps", 50.0) * step_s / 8000.0,
+            record_number(raw, "downlink_rate_kbps", 50.0) * step_s / 8000.0,
         ),
         "last_net_energy_norm": float(last["net_energy_wh"]) / energy_scale,
         "last_planner_energy_norm": float(last["planner_energy_wh"]) / energy_scale,
@@ -231,7 +231,7 @@ def _state_values(raw: Mapping[str, Any]) -> dict[str, float]:
         "time_to_next_pass": bool(raw.get("next_pass_known", True)),
     }
     values = {
-        name: _number(raw, name)
+        name: record_number(raw, name)
         for name in EVENTSAT_STATES
         if name not in {"current_mode_idx", "in_sunlight", "station_visible", "health_nominal"}
     }
@@ -240,7 +240,7 @@ def _state_values(raw: Mapping[str, Any]) -> dict[str, float]:
         in_sunlight=float(bool(raw.get("in_sunlight", False))),
         station_visible=float(bool(raw.get("station_visible", False))),
         contact_window_active=float(bool(raw.get("contact_window_active", False))),
-        physical_contact_seconds=_number(raw, "contact_window_seconds"),
+        physical_contact_seconds=record_number(raw, "contact_window_seconds"),
         health_nominal=float(raw.get("health_status", "nominal") == "nominal"),
     )
     for name, is_known in known.items():

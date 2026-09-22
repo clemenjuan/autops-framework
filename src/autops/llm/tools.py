@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from autops.missions.eventsat.physics import MODES
+from autops.missions.eventsat.transitions import record_number
 
 
 @dataclass(frozen=True)
@@ -45,13 +46,6 @@ _TOOLS = {
 SCHEDULE_TOOL_NAMES = ["check_constraints", "evaluate_plan"]
 
 
-def _number(state: dict[str, Any], key: str, default: float) -> float:
-    try:
-        return float(state.get(key, default))
-    except (TypeError, ValueError):
-        return default
-
-
 def _has_almanac(state: dict[str, Any]) -> bool:
     """Ground records carry the contact almanac; the onboard view does not."""
 
@@ -59,13 +53,13 @@ def _has_almanac(state: dict[str, Any]) -> bool:
 
 
 def _get_pipeline_bottleneck(state: dict[str, Any]) -> str:
-    if _number(state, "uncompressed_observations", 0.0) > 0:
+    if record_number(state, "uncompressed_observations", 0.0) > 0:
         return "compression_needed"
-    if _number(state, "undetected_observations", 0.0) > 0:
+    if record_number(state, "undetected_observations", 0.0) > 0:
         return "detection_needed"
-    if _number(state, "jetson_compressed_mb", 0.0) > 0:
+    if record_number(state, "jetson_compressed_mb", 0.0) > 0:
         return "send_to_obc_needed"
-    if _number(state, "obc_data_mb", 0.0) > 0:
+    if record_number(state, "obc_data_mb", 0.0) > 0:
         return "downlink_needed"
     return "none"
 
@@ -75,9 +69,9 @@ def check_constraints(state: dict[str, Any], proposed_mode: str = "charging") ->
 
     violations: list[dict[str, str]] = []
     warnings: list[dict[str, str]] = []
-    soc = _number(state, "battery_soc", 0.5)
+    soc = record_number(state, "battery_soc", 0.5)
     health = str(state.get("health_status", "nominal"))
-    hard_soc = _number(state, "battery_min_soc", 0.20)
+    hard_soc = record_number(state, "battery_min_soc", 0.20)
     productive = True
 
     if proposed_mode not in MODES:
@@ -99,10 +93,10 @@ def check_constraints(state: dict[str, Any], proposed_mode: str = "charging") ->
         )
 
     if proposed_mode == "communication":
-        productive = _number(state, "obc_data_mb", 0.0) > 0
+        productive = record_number(state, "obc_data_mb", 0.0) > 0
         if _has_almanac(state):
             contact = bool(state.get("ground_pass_active", False))
-            if not contact or _number(state, "contact_window_seconds", 0.0) <= 0:
+            if not contact or record_number(state, "contact_window_seconds", 0.0) <= 0:
                 violations.append(
                     {"constraint": "ground_pass", "reason": "No positive contact window is active."}
                 )
@@ -115,19 +109,21 @@ def check_constraints(state: dict[str, Any], proposed_mode: str = "charging") ->
                 }
             )
     elif proposed_mode == "payload_observe":
-        capacity = _number(state, "jetson_capacity_mb", 249036.8)
-        stored = _number(state, "jetson_raw_mb", 0.0) + _number(state, "jetson_compressed_mb", 0.0)
-        productive = stored + _number(state, "observation_size_mb", 9.41) <= capacity
+        capacity = record_number(state, "jetson_capacity_mb", 249036.8)
+        stored = record_number(state, "jetson_raw_mb", 0.0) + record_number(
+            state, "jetson_compressed_mb", 0.0
+        )
+        productive = stored + record_number(state, "observation_size_mb", 9.41) <= capacity
         if not productive:
             violations.append(
                 {"constraint": "jetson_capacity", "reason": "A complete product would not fit."}
             )
     elif proposed_mode == "payload_compress":
-        productive = _number(state, "uncompressed_observations", 0.0) >= 1
+        productive = record_number(state, "uncompressed_observations", 0.0) >= 1
     elif proposed_mode == "payload_detect":
-        productive = _number(state, "undetected_observations", 0.0) >= 1
+        productive = record_number(state, "undetected_observations", 0.0) >= 1
     elif proposed_mode == "payload_send":
-        productive = _number(state, "jetson_compressed_mb", 0.0) > 0
+        productive = record_number(state, "jetson_compressed_mb", 0.0) > 0
 
     if not productive and proposed_mode not in {"charging", "safe"}:
         warnings.append(
@@ -158,39 +154,42 @@ def evaluate_plan(state: dict[str, Any], proposed_mode: str = "charging") -> dic
     progress_mb = 0.0
     if constraints["feasible"] and constraints["productive_this_step"]:
         link_mb = (
-            _number(state, "downlink_rate_kbps", 50.0) * _number(state, "step_duration_s", 60.0)
+            record_number(state, "downlink_rate_kbps", 50.0)
+            * record_number(state, "step_duration_s", 60.0)
         ) / 8000.0
         if proposed_mode == "communication":
             available = (
-                _number(state, "remaining_achievable_downlink_mb", 0.0)
+                record_number(state, "remaining_achievable_downlink_mb", 0.0)
                 if _has_almanac(state)
                 else link_mb
             )
-            progress_mb = min(_number(state, "obc_data_mb", 0.0), max(0.0, available))
+            progress_mb = min(record_number(state, "obc_data_mb", 0.0), max(0.0, available))
             utility = progress_mb / max(available, 1e-12)
         elif proposed_mode == "payload_send":
-            rate = _number(state, "jetson_to_obc_rate_kbps", 8000.0)
-            duration = _number(state, "step_duration_s", 60.0)
-            progress_mb = min(_number(state, "jetson_compressed_mb", 0.0), rate * duration / 8000)
+            rate = record_number(state, "jetson_to_obc_rate_kbps", 8000.0)
+            duration = record_number(state, "step_duration_s", 60.0)
+            progress_mb = min(
+                record_number(state, "jetson_compressed_mb", 0.0), rate * duration / 8000
+            )
         elif proposed_mode == "payload_observe":
-            ratio = max(_number(state, "compression_ratio", 5.11), 1e-12)
-            progress_mb = _number(state, "observation_size_mb", 9.41) / ratio
+            ratio = max(record_number(state, "compression_ratio", 5.11), 1e-12)
+            progress_mb = record_number(state, "observation_size_mb", 9.41) / ratio
         elif proposed_mode == "payload_compress":
-            required = max(_number(state, "compression_time_factor", 2.0), 1.0)
+            required = max(record_number(state, "compression_time_factor", 2.0), 1.0)
             progress_mb = (
-                _number(state, "observation_size_mb", 9.41)
-                / max(_number(state, "compression_ratio", 5.11), 1e-12)
+                record_number(state, "observation_size_mb", 9.41)
+                / max(record_number(state, "compression_ratio", 5.11), 1e-12)
                 / required
             )
         elif proposed_mode == "payload_detect":
-            progress_mb = _number(state, "detection_metadata_mb", 0.01) / max(
-                _number(state, "detection_steps", 5.0), 1.0
+            progress_mb = record_number(state, "detection_metadata_mb", 0.01) / max(
+                record_number(state, "detection_steps", 5.0), 1.0
             )
         # The onboard view has no pass capacity; one step of link capacity is the scale.
         reference = (
             max(
-                _number(state, "future_pass_capacity_mb", 0.0),
-                _number(state, "achievable_downlink_mb", 0.0),
+                record_number(state, "future_pass_capacity_mb", 0.0),
+                record_number(state, "achievable_downlink_mb", 0.0),
             )
             if _has_almanac(state)
             else link_mb

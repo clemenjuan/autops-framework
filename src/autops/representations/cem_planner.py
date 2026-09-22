@@ -27,6 +27,7 @@ from autops.core.plugin import Representation
 from autops.core.types import DecisionContext, SpaceSpec
 from autops.missions.eventsat.observation import encode_vectors, onboard_view
 from autops.missions.eventsat.physics import MODES
+from autops.missions.eventsat.transitions import record_number
 from autops.wm.artifact import PlannerArtifact, load_artifact
 from autops.wm.cem import CEMConfig, categorical_cem, initial_probabilities
 from autops.wm.compute import PlannerComputeEvidence
@@ -34,10 +35,9 @@ from autops.wm.guidance import (
     CandidateProjection,
     admissible_action_mask,
     guided_probabilities,
-    pipeline_scores,
     project_executable_candidates,
-    seed_pipeline_candidate,
 )
+from autops.wm.pipeline import pipeline_scores, seed_pipeline_candidate
 from autops.wm.schema import EVENTSAT_ACTIONS, EVENTSAT_OBSERVATIONS
 from autops.wm.scoring import scalarization_weights
 
@@ -68,13 +68,6 @@ def _effective_cem(artifact: PlannerArtifact, config: Mapping[str, Any]) -> CEMC
     if "min_probability" in config:
         overrides["min_probability"] = float(config["min_probability"])
     return replace(artifact.cem, **overrides)
-
-
-def _number(state: Mapping[str, Any], key: str, default: float = 0.0) -> float:
-    try:
-        return float(state.get(key, default))
-    except (TypeError, ValueError):
-        return default
 
 
 class EventSatCEMBase(Representation):
@@ -387,7 +380,7 @@ class EventSatCEMBase(Representation):
         return bool(
             self._downlink_reflex
             and state.get("station_visible", False)
-            and _number(state, "obc_data_mb") > 0.01
+            and record_number(state, "obc_data_mb") > 0.01
             and mask[self._action_index["communication"]]
         )
 

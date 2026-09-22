@@ -15,7 +15,8 @@ from autops.wm.artifact import (
     ProbeEvidenceContract,
 )
 from autops.wm.cem import CEMConfig
-from autops.wm.guidance import pipeline_scores, project_executable_candidates
+from autops.wm.guidance import project_executable_candidates
+from autops.wm.pipeline import pipeline_scores
 from autops.wm.schema import EVENTSAT_ACTIONS, EVENTSAT_OBSERVATIONS
 from autops.wm.scoring import analytical_candidate_attributes
 

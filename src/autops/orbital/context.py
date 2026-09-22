@@ -11,6 +11,7 @@ from .models import (
     EclipseInterval,
     GroundPass,
     GroundStation,
+    NavigationTrack,
     OrbitElements,
     SimplifiedModel,
 )
@@ -20,7 +21,11 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True, slots=True)
 class OrbitalContext:
-    """Precomputed physical event intervals for one episode."""
+    """Precomputed physical event intervals for one episode.
+
+    ``navigation`` is absent for the seeded fallback: its passes are not derived
+    from state vectors, so no consistent navigation solution exists.
+    """
 
     eclipses: tuple[EclipseInterval, ...]
     ground_passes: tuple[GroundPass, ...]
@@ -28,10 +33,13 @@ class OrbitalContext:
     propagator_kind: str
     step_s: float
     duration_s: float
+    navigation: NavigationTrack | None = None
 
     def __post_init__(self) -> None:
         if self.step_s <= 0.0 or self.duration_s <= 0.0:
             raise ValueError("step_s and duration_s must be positive")
+        if self.navigation is not None and self.navigation.step_s != self.step_s:
+            raise ValueError("navigation samples must use the context step")
 
     def _step_window(self, step: int) -> tuple[float, float]:
         if step < 0:
@@ -150,12 +158,7 @@ def build_orbital_context(
             from . import orekit
 
             propagator = orekit.create_propagator(orbit)
-            eclipses = orekit.eclipse_intervals(
-                propagator,
-                duration_s=duration_s,
-                sample_s=step_s,
-            )
-            passes = orekit.ground_passes(
+            geometry = orekit.sample_geometry(
                 propagator,
                 ground_station,
                 duration_s=duration_s,
@@ -163,12 +166,13 @@ def build_orbital_context(
                 downlink_rate_kbps=downlink_rate_kbps,
             )
             return OrbitalContext(
-                eclipses=eclipses,
-                ground_passes=passes,
+                eclipses=geometry.eclipses,
+                ground_passes=geometry.ground_passes,
                 backend="orekit",
                 propagator_kind=propagator.kind,
                 step_s=step_s,
                 duration_s=duration_s,
+                navigation=geometry.navigation,
             )
         except Exception as exc:
             if require_orekit:

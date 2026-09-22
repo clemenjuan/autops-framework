@@ -10,8 +10,16 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import numpy as np
+
 from .fallback import data_capacity_mb
-from .models import EclipseInterval, GroundPass, GroundStation, OrbitElements
+from .models import (
+    EclipseInterval,
+    GroundPass,
+    GroundStation,
+    NavigationTrack,
+    OrbitElements,
+)
 
 
 class OrekitUnavailable(RuntimeError):
@@ -103,6 +111,7 @@ class OrekitPropagator:
 
     raw: Any
     kind: str
+    epoch: datetime
 
 
 def create_propagator(orbit: OrbitElements) -> OrekitPropagator:
@@ -125,7 +134,7 @@ def create_propagator(orbit: OrbitElements) -> OrekitPropagator:
         constants.WGS84_EARTH_MU,
     )
     if orbit.propagator == "keplerian":
-        return OrekitPropagator(bindings.KeplerianPropagator(keplerian), "keplerian")
+        return OrekitPropagator(bindings.KeplerianPropagator(keplerian), "keplerian", orbit.epoch)
 
     raw = bindings.EcksteinHechlerPropagator(
         keplerian,
@@ -137,7 +146,7 @@ def create_propagator(orbit: OrbitElements) -> OrekitPropagator:
         0.0,
         0.0,
     )
-    return OrekitPropagator(raw, "eckstein-hechler-j2")
+    return OrekitPropagator(raw, "eckstein-hechler-j2", orbit.epoch)
 
 
 def position_km(propagator: OrekitPropagator, elapsed_s: float) -> tuple[float, float, float]:
@@ -157,38 +166,98 @@ def _sample_times(duration_s: float, sample_s: float) -> tuple[float, ...]:
     return tuple(times)
 
 
-def eclipse_intervals(
+@dataclass(frozen=True, slots=True)
+class OrbitGeometry:
+    """Events and ideal navigation from one sampled propagation."""
+
+    eclipses: tuple[EclipseInterval, ...]
+    ground_passes: tuple[GroundPass, ...]
+    navigation: NavigationTrack
+
+
+def sample_geometry(
     propagator: OrekitPropagator,
+    station: GroundStation,
     *,
     duration_s: float,
     sample_s: float,
-) -> tuple[EclipseInterval, ...]:
-    """Sample the cylindrical Earth-shadow geometry into intervals."""
+    downlink_rate_kbps: float,
+) -> OrbitGeometry:
+    """Propagate once; derive shadow, contact, and navigation from each sample.
+
+    Shadow uses cylindrical Earth geometry in the propagation frame. Contact
+    samples topocentric elevation and linearly interpolates AOS/LOS crossings.
+    """
 
     bindings = _bindings()
     sun = bindings.CelestialBodyFactory.getSun()
     earth = _earth(bindings)
+    itrf = earth.getBodyFrame()
+    frame = _ground_frame(bindings, station)
     initial = propagator.raw.getInitialState().getDate()
+    times = _sample_times(duration_s, sample_s)
+    shadow: list[bool] = []
+    elevation: list[float] = []
+    fixed_pv: list[tuple[float, ...]] = []
+    for elapsed_s in times:
+        state = propagator.raw.propagate(initial.shiftedBy(elapsed_s))
+        date = state.getDate()
+        satellite = state.getPVCoordinates().getPosition()
+        sun_position = sun.getPVCoordinates(date, state.getFrame()).getPosition()
+        shadow.append(_in_shadow(satellite, sun_position, earth.getEquatorialRadius()))
+        tracking = frame.getTrackingCoordinates(satellite, state.getFrame(), date)
+        elevation.append(math.degrees(tracking.getElevation()))
+        pv = state.getPVCoordinates(itrf)
+        sun_fixed = sun.getPVCoordinates(date, itrf).getPosition()
+        fixed_pv.append(
+            (
+                *_vector(pv.getPosition(), 1e-3),
+                *_vector(pv.getVelocity(), 1e-3),
+                *_vector(sun_fixed, 1.0 / sun_fixed.getNorm()),
+            )
+        )
+    grid = math.floor(duration_s / sample_s) + 1
+    samples = np.asarray(fixed_pv[:grid], dtype=np.float64)
+    return OrbitGeometry(
+        eclipses=_eclipse_intervals(times, shadow, duration_s),
+        ground_passes=_ground_passes(
+            times, elevation, station.min_elevation_deg, duration_s, downlink_rate_kbps
+        ),
+        navigation=NavigationTrack(
+            epoch=propagator.epoch,
+            step_s=sample_s,
+            position_km=samples[:, 0:3],
+            velocity_km_s=samples[:, 3:6],
+            sun_unit=samples[:, 6:9],
+            station_elevation_deg=np.asarray(elevation[:grid], dtype=np.float64),
+        ),
+    )
+
+
+def _vector(value: Any, scale: float) -> tuple[float, float, float]:
+    return value.getX() * scale, value.getY() * scale, value.getZ() * scale
+
+
+def _in_shadow(satellite: Any, sun_position: Any, earth_radius_m: float) -> bool:
+    cosine = satellite.dotProduct(sun_position) / (satellite.getNorm() * sun_position.getNorm())
+    cosine = min(1.0, max(-1.0, cosine))
+    return cosine < 0.0 and (
+        satellite.getNorm() * math.sqrt(max(0.0, 1.0 - cosine * cosine)) < earth_radius_m
+    )
+
+
+def _eclipse_intervals(
+    times: tuple[float, ...], shadow: list[bool], duration_s: float
+) -> tuple[EclipseInterval, ...]:
     start_s: float | None = None
     intervals: list[EclipseInterval] = []
-
-    for elapsed_s in _sample_times(duration_s, sample_s):
-        state = propagator.raw.propagate(initial.shiftedBy(elapsed_s))
-        satellite = state.getPVCoordinates().getPosition()
-        sun_position = sun.getPVCoordinates(state.getDate(), state.getFrame()).getPosition()
-        cosine = satellite.dotProduct(sun_position) / (satellite.getNorm() * sun_position.getNorm())
-        cosine = min(1.0, max(-1.0, cosine))
-        in_shadow = cosine < 0.0 and (
-            satellite.getNorm() * math.sqrt(max(0.0, 1.0 - cosine * cosine))
-            < earth.getEquatorialRadius()
-        )
+    for elapsed_s, in_shadow in zip(times, shadow, strict=True):
         if in_shadow and start_s is None:
             start_s = elapsed_s
         elif not in_shadow and start_s is not None:
             if elapsed_s > start_s:
                 intervals.append(EclipseInterval(start_s, elapsed_s))
             start_s = None
-
     if start_s is not None and duration_s > start_s:
         intervals.append(EclipseInterval(start_s, duration_s))
     return tuple(intervals)
@@ -225,19 +294,13 @@ def _threshold_crossing_s(
     return previous_s + min(1.0, max(0.0, fraction)) * (current_s - previous_s)
 
 
-def ground_passes(
-    propagator: OrekitPropagator,
-    station: GroundStation,
-    *,
+def _ground_passes(
+    times: tuple[float, ...],
+    elevations: list[float],
+    min_elevation_deg: float,
     duration_s: float,
-    sample_s: float,
     downlink_rate_kbps: float,
 ) -> tuple[GroundPass, ...]:
-    """Sample elevation and linearly interpolate AOS/LOS threshold crossings."""
-
-    bindings = _bindings()
-    frame = _ground_frame(bindings, station)
-    initial = propagator.raw.getInitialState().getDate()
     previous: tuple[float, float] | None = None
     start_s: float | None = None
     max_elevation_deg = 0.0
@@ -259,35 +322,22 @@ def ground_passes(
         )
         start_s = None
 
-    for elapsed_s in _sample_times(duration_s, sample_s):
-        state = propagator.raw.propagate(initial.shiftedBy(elapsed_s))
-        position = state.getPVCoordinates().getPosition()
-        tracking = frame.getTrackingCoordinates(position, state.getFrame(), state.getDate())
-        elevation_deg = math.degrees(tracking.getElevation())
-
-        if elevation_deg >= station.min_elevation_deg:
+    for elapsed_s, elevation_deg in zip(times, elevations, strict=True):
+        if elevation_deg >= min_elevation_deg:
             if start_s is None:
                 start_s = elapsed_s
-                if previous is not None and previous[1] < station.min_elevation_deg:
+                if previous is not None and previous[1] < min_elevation_deg:
                     start_s = _threshold_crossing_s(
-                        previous[0],
-                        previous[1],
-                        elapsed_s,
-                        elevation_deg,
-                        station.min_elevation_deg,
+                        previous[0], previous[1], elapsed_s, elevation_deg, min_elevation_deg
                     )
                 max_elevation_deg = elevation_deg
             else:
                 max_elevation_deg = max(max_elevation_deg, elevation_deg)
         elif start_s is not None:
             end_s = elapsed_s
-            if previous is not None and previous[1] >= station.min_elevation_deg:
+            if previous is not None and previous[1] >= min_elevation_deg:
                 end_s = _threshold_crossing_s(
-                    previous[0],
-                    previous[1],
-                    elapsed_s,
-                    elevation_deg,
-                    station.min_elevation_deg,
+                    previous[0], previous[1], elapsed_s, elevation_deg, min_elevation_deg
                 )
             close(end_s)
         previous = elapsed_s, elevation_deg

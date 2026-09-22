@@ -7,6 +7,7 @@ import random
 from datetime import UTC, datetime
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from autops.orbital import (
@@ -263,3 +264,48 @@ def test_actual_orekit_eckstein_hechler_backend(orbit: OrbitElements) -> None:
     assert propagator.kind == "eckstein-hechler-j2"
     assert 6_700.0 < math.dist((0.0, 0.0, 0.0), initial) < 6_900.0
     assert math.dist(initial, later) > 100.0
+
+
+@pytest.mark.orekit
+def test_orekit_navigation_is_earth_fixed_and_consistent_with_events(
+    orbit: OrbitElements, fallback: SimplifiedModel, station: GroundStation
+) -> None:
+    if not orekit.is_available():
+        pytest.skip("Orekit, Java 17, or orekit-data.zip is unavailable")
+    context = build_orbital_context(
+        orbit,
+        fallback,
+        station,
+        downlink_rate_kbps=50.0,
+        step_s=60.0,
+        total_steps=1_440,
+        seed=0,
+        require_orekit=True,
+    )
+    track = context.navigation
+    assert track is not None and len(track) == 1_441
+    radius = np.linalg.norm(track.position_km, axis=1)
+    assert np.all((radius > 6_750.0) & (radius < 6_810.0))
+    np.testing.assert_allclose(np.linalg.norm(track.sun_unit, axis=1), 1.0, atol=1e-12)
+    # Centred ITRF differences; omitting the ~0.3 km/s rotating-frame term fails.
+    centred = (track.position_km[2:] - track.position_km[:-2]) / 120.0
+    np.testing.assert_allclose(track.velocity_km_s[1:-1], centred, atol=0.05)
+    visible = track.station_elevation_deg >= station.min_elevation_deg
+    in_pass = [context.is_ground_pass_active(step) for step in range(1_440)]
+    assert all(in_pass[step] for step in np.flatnonzero(visible[:-1]))
+
+
+def test_fallback_has_no_navigation_solution(
+    orbit: OrbitElements, fallback: SimplifiedModel, station: GroundStation
+) -> None:
+    context = build_orbital_context(
+        orbit,
+        fallback,
+        station,
+        downlink_rate_kbps=50.0,
+        step_s=60.0,
+        total_steps=10,
+        seed=0,
+        prefer_orekit=False,
+    )
+    assert context.navigation is None

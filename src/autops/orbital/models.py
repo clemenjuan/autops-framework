@@ -8,6 +8,8 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Literal
 
+import numpy as np
+
 
 def _positive(name: str, value: float) -> None:
     if not math.isfinite(value) or value <= 0.0:
@@ -134,3 +136,39 @@ class GroundPass(TimeInterval):
 
     max_elevation_deg: float
     data_budget_mb: float
+
+
+@dataclass(frozen=True, slots=True)
+class NavigationTrack:
+    """Ideal onboard navigation and present geometry sampled at step starts.
+
+    Row ``k`` describes elapsed time ``k * step_s`` from ``epoch``. Position and
+    coordinate velocity are Earth-fixed (ITRF, IERS 2010); the rotating-frame
+    velocity term is included. The Sun unit vector uses the same frame, and the
+    ground-station elevation is the instantaneous topocentric elevation. These
+    are ideal simulated PVT and ephemeris values, not a receiver error model.
+    """
+
+    epoch: datetime
+    step_s: float
+    position_km: np.ndarray
+    velocity_km_s: np.ndarray
+    sun_unit: np.ndarray
+    station_elevation_deg: np.ndarray
+
+    def __post_init__(self) -> None:
+        _positive("step_s", self.step_s)
+        if self.epoch.tzinfo is None or self.epoch.utcoffset() is None:
+            raise ValueError("epoch must be timezone-aware")
+        rows = len(self.station_elevation_deg)
+        if rows < 1 or self.station_elevation_deg.shape != (rows,):
+            raise ValueError("station_elevation_deg must be a non-empty vector")
+        for name in ("position_km", "velocity_km_s", "sun_unit"):
+            if getattr(self, name).shape != (rows, 3):
+                raise ValueError(f"{name} must have shape ({rows}, 3)")
+        for name in ("position_km", "velocity_km_s", "sun_unit", "station_elevation_deg"):
+            if not np.isfinite(getattr(self, name)).all():
+                raise ValueError(f"{name} must be finite")
+
+    def __len__(self) -> int:
+        return len(self.station_elevation_deg)

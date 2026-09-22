@@ -13,8 +13,9 @@ from typing import Any
 
 from autops.core.plugin import Representation, register
 from autops.core.types import DecisionContext, SpaceSpec
-from autops.missions.eventsat.observation import encode_vectors
+from autops.missions.eventsat.observation import encode_vectors, onboard_view
 from autops.missions.eventsat.physics import MODES
+from autops.wm.schema import EVENTSAT_OBSERVATIONS
 
 
 def _action(mode: str, *, schedule: list[dict[str, Any]] | None = None) -> dict[str, Any]:
@@ -26,12 +27,14 @@ def _action(mode: str, *, schedule: list[dict[str, Any]] | None = None) -> dict[
 
 @register("symb", mission="eventsat", role="onboard")
 class EventSatSymbolic(Representation):
-    observation_space = SpaceSpec((25,), "float32", 0.0, 1.0)
+    """Reactive onboard rules over the onboard view; no pass or capacity forecast."""
+
+    observation_space = SpaceSpec((len(EVENTSAT_OBSERVATIONS),), "float32", -1.0, 1.0)
     action_space = SpaceSpec((7,), "int64", 0, 1, MODES)
 
     def encode_observation(self, observation: dict[str, Any]) -> dict[str, Any]:
         _, _, raw = encode_vectors(observation)
-        return raw
+        return onboard_view(raw)
 
     def select_action(self, context: DecisionContext) -> dict[str, Any]:
         state = context.state
@@ -40,23 +43,14 @@ class EventSatSymbolic(Representation):
             return self._choose("safe", "R1 anomaly active: protective safe mode")
         if soc < 0.35:
             return self._choose("charging", f"R2 battery critical ({soc:.3f} < 0.35)")
-        if state.get("contact_window_active") and float(state.get("obc_data_mb", 0.0)) > 0:
-            return self._choose("communication", "R3 predicted contact with OBC backlog")
+        if state.get("station_visible") and float(state.get("obc_data_mb", 0.0)) > 0:
+            return self._choose("communication", "R3 station visible with OBC backlog")
         if int(state.get("uncompressed_observations", 0)) > 0:
             return self._choose("payload_compress", "R5 raw product awaiting compression")
         if int(state.get("undetected_observations", 0)) > 0:
             return self._choose("payload_detect", "R5c compressed product awaiting detection")
         if float(state.get("jetson_compressed_mb", 0.0)) > 1e-12:
             return self._choose("payload_send", "R5d compressed bytes awaiting CAN transfer")
-        projected = (
-            float(state.get("obc_data_mb", 0.0))
-            + float(state.get("jetson_compressed_mb", 0.0))
-            + float(state.get("observation_size_mb", 9.41))
-            / max(float(state.get("compression_ratio", 5.11)), 1e-12)
-        )
-        remaining = float(state.get("remaining_achievable_downlink_mb", math.inf))
-        if projected > remaining + 1e-12:
-            return self._choose("charging", "R5b new product exceeds remaining link capacity")
         capacity = float(state.get("storage_capacity_mb", 4096.0))
         if soc > 0.6 and float(state.get("data_stored_mb", 0.0)) < 0.8 * capacity:
             return self._choose("payload_observe", "R6 resources permit a science product")

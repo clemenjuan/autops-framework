@@ -15,6 +15,7 @@ from autops.missions.eventsat.env import EventSatEnvironment
 from autops.missions.eventsat.observation import FORECAST_KEYS, encode_vectors
 from autops.orbital import orekit
 from autops.representations.analytical_planner import EventSatAnalyticalCEM
+from autops.representations.symb import EventSatSymbolic
 from autops.representations.wm_planner import EventSatLeWMCEM
 from autops.wm.dataset import split_episodes
 from autops.wm.guidance import admissible_action_mask
@@ -140,3 +141,23 @@ def test_navigation_distinguishes_launch_seeds_with_equal_elapsed_time() -> None
     second = encode_vectors(_environment(2, prefer_orekit=True).reset(43))[0]
     position = [EVENTSAT_OBSERVATIONS.index(f"position_itrf_{axis}_norm") for axis in "xyz"]
     assert np.linalg.norm(first[position] - second[position]) > 0.5
+
+
+def test_onboard_rules_react_to_present_visibility_not_forecasts() -> None:
+    observation = _environment().reset(7)
+    metadata = _metadata(observation)
+    metadata["obc_data_mb"] = 5.0
+    rules = EventSatSymbolic()
+
+    def decide(**updates: Any) -> str:
+        record = deepcopy(observation)
+        _metadata(record).update(updates)
+        state = rules.encode_observation(record)
+        assert not set(FORECAST_KEYS) & set(state)
+        return rules.select_action(DecisionContext(state, record, None, 0, "onboard"))[
+            "eventsat_0"
+        ]["mode"]
+
+    assert metadata["planning_contact_seconds"]
+    assert decide(station_visible=False, contact_window_active=True) != "communication"
+    assert decide(station_visible=True, contact_window_active=False) == "communication"

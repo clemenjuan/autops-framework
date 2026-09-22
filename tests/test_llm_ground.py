@@ -227,3 +227,18 @@ def test_parse_retry_reaches_provider_and_then_replays_cache(
     assert planner.select_action(_context()) == action
     assert len(calls) == 2
     assert planner.client.metrics()["llm_cache_hits"] == 2.0
+
+
+def test_hybrid_onboard_shield_permits_prepointing_only_with_obc_data() -> None:
+    def decide(**updates):
+        planner = create_representation(
+            "eventsat",
+            "hllm-s",
+            "onboard",
+            {"llm_replay": [_response("communication", [["charging", 2]])], "plan_hold": 3},
+        )
+        state = _state(ground_pass_active=False, **updates)
+        return planner.select_action(DecisionContext(state, {}, None, 0, role="onboard"))
+
+    assert decide(obc_data_mb=2.0)["eventsat_0"]["mode"] == "communication"
+    assert decide(obc_data_mb=0.0)["eventsat_0"]["mode"] == "charging"

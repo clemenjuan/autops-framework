@@ -1,3 +1,5 @@
+import pytest
+
 from autops.llm.agentic_prompts import (
     AGENTIC_SCHEDULE_SYSTEM_PROMPT,
     format_forced_schedule_prompt,
@@ -13,7 +15,12 @@ from autops.llm.onboard_prompts import (
     ONBOARD_SCHEDULE_SYSTEM_PROMPT,
     format_onboard_schedule_prompt,
 )
-from autops.llm.tools import SCHEDULE_TOOL_NAMES, get_tool_schemas
+from autops.llm.tools import (
+    SCHEDULE_TOOL_NAMES,
+    check_constraints,
+    evaluate_plan,
+    get_tool_schemas,
+)
 
 
 def test_operational_prompt_invariants_are_preserved() -> None:
@@ -37,19 +44,55 @@ def test_operational_prompt_invariants_are_preserved() -> None:
     assert "INTERNAL reasoning CONCISE" in ONBOARD_AGENTIC_SCHEDULE_SYSTEM_PROMPT
 
 
-def test_onboard_schedule_prompt_exposes_only_deterministic_lookahead() -> None:
+def test_onboard_schedule_prompt_reports_present_geometry_without_forecasts() -> None:
     prompt = format_onboard_schedule_prompt(
         {
             "battery_soc": 0.6,
-            "planning_contact_seconds": [0.0, 60.0, 0.0],
-            "planning_sunlight": [True, False, True],
+            "station_visible": True,
+            "in_sunlight": False,
+            "navigation": {"valid": True, "station_elevation_deg": 23.44},
+            "last_interval": {"executed_mode": "payload_send", "action_accepted": False},
         },
         2,
     )
 
-    assert "Contact-active offsets: [1]" in prompt
-    assert "Sunlight offsets: [0, 2]" in prompt
     assert "PLAN NOW PLUS THE NEXT 2 HELD STEPS" in prompt
+    assert "Ground station: visible now (elevation 23.4 deg)" in prompt
+    assert "Sunlight now: no" in prompt
+    assert "Last interval: executed payload_send, rejected" in prompt
+    assert "offsets" not in prompt.lower() and "achievable" not in prompt.lower()
+    assert "No ground-pass\nschedule or eclipse forecast" in ONBOARD_SCHEDULE_SYSTEM_PROMPT
+
+
+def test_onboard_llm_prompt_is_invariant_to_hidden_future_tables() -> None:
+    from copy import deepcopy
+
+    from autops.config import expand_coordinate
+    from autops.core.plugin import create_representation
+    from autops.missions.eventsat.env import EventSatEnvironment
+
+    config = deepcopy(expand_coordinate("eventsat/sas/ao/llm-s").mission_config)
+    observation = EventSatEnvironment(config, max_steps=4, prefer_orekit=False).reset(7)
+    changed = deepcopy(observation)
+    changed["satellites"]["eventsat_0"]["metadata"].update(
+        time_to_next_pass=1.0, remaining_achievable_downlink_mb=999.0
+    )
+    planner = create_representation("eventsat", "llm-s", "onboard", {"llm_replay": []})
+    prompts = [
+        format_onboard_schedule_prompt(planner.encode_observation(record), 2)
+        for record in (observation, changed)
+    ]
+    assert prompts[0] == prompts[1]
+
+
+def test_onboard_tools_permit_prepointing_while_ground_tools_require_a_pass() -> None:
+    onboard = {"battery_soc": 0.8, "obc_data_mb": 2.0, "station_visible": False}
+    ground = {**onboard, "ground_pass_active": False, "contact_window_seconds": 0.0}
+    prepoint = check_constraints(onboard, "communication")
+    assert prepoint["feasible"] and not prepoint["productive_this_step"]
+    assert not check_constraints(ground, "communication")["feasible"]
+    visible = evaluate_plan({**onboard, "station_visible": True}, "communication")
+    assert visible["pipeline_progress_mb"] == pytest.approx(0.375)
 
 
 def test_agentic_registry_advertises_only_what_if_tools() -> None:

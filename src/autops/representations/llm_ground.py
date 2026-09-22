@@ -24,10 +24,11 @@ from autops.llm.onboard_prompts import (
     format_onboard_tool_result_prompt,
 )
 from autops.llm.tools import execute_tool
-from autops.missions.eventsat.observation import encode_vectors
+from autops.missions.eventsat.observation import encode_vectors, onboard_view
 from autops.missions.eventsat.physics import MODES
 from autops.paradigms.base import expand_schedule
 from autops.wm.cem import CEMConfig
+from autops.wm.schema import EVENTSAT_OBSERVATIONS
 
 _VALID_MODES = frozenset(MODES)
 _OPERATIONAL_MODES = frozenset(
@@ -82,7 +83,7 @@ def _merge_schedule(blocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
 class LLMSchedulePlanner(Representation):
     """Shared schedule parser, bounded LLM loop, and optional symbolic shield."""
 
-    observation_space = SpaceSpec((25,), "float32", 0.0, 1.0)
+    observation_space = SpaceSpec((len(EVENTSAT_OBSERVATIONS),), "float32", -1.0, 1.0)
     action_space = SpaceSpec((7,), "int64", 0, 1, MODES)
     symbolic_grounding: ClassVar[bool] = False
     agentic: ClassVar[bool] = False
@@ -108,7 +109,11 @@ class LLMSchedulePlanner(Representation):
 
     def encode_observation(self, observation: dict[str, Any]) -> dict[str, Any]:
         _, _, raw = encode_vectors(observation)
-        raw["ground_pass_active"] = bool(raw.get("contact_window_active", False))
+        if self.role == "onboard":
+            raw = onboard_view(raw)
+            raw["ground_pass_active"] = bool(raw.get("station_visible", False))
+        else:
+            raw["ground_pass_active"] = bool(raw.get("contact_window_active", False))
         raw["step"] = int(observation.get("step", 0))
         raw.setdefault("step_duration_s", 60.0)
         raw.setdefault("battery_min_soc", 0.20)
@@ -293,11 +298,20 @@ class LLMSchedulePlanner(Representation):
         )
         if unhealthy or battery_critical:
             grounded = "safe"
-        elif grounded == "communication" and not state.get("ground_pass_active", False):
+        elif grounded == "communication" and not self._communication_admissible(state):
             grounded = "charging"
         if grounded != mode:
             self._grounding_overrides += 1
         return grounded
+
+    def _communication_admissible(self, state: dict[str, Any]) -> bool:
+        """Ground plans need an active pass; onboard, prepointing with OBC data is allowed."""
+
+        if self.role == "onboard":
+            return bool(state.get("ground_pass_active", False)) or (
+                float(state.get("obc_data_mb", 0.0)) > 0.01
+            )
+        return bool(state.get("ground_pass_active", False))
 
     def _schedule(self, raw: Any, gap_steps: int, state: dict[str, Any]) -> list[dict[str, Any]]:
         if not isinstance(raw, list):

@@ -12,9 +12,11 @@ from autops.llm.tools import (
 
 ONBOARD_SCHEDULE_SYSTEM_PROMPT = """\
 You are the autonomous onboard scheduler for a single Earth observation satellite
-in low Earth orbit (400 km SSO). You receive fresh spacecraft telemetry and a
-deterministic orbital almanac. Choose the immediate mode and a short plan that the
-spacecraft will hold until the next onboard planning event.
+in low Earth orbit (400 km SSO). You receive fresh spacecraft telemetry: resources,
+payload state, attitude settling, the outcome of the last interval, whether the ground
+station is visible now, and whether the spacecraft is in sunlight now. No ground-pass
+schedule or eclipse forecast is available onboard. Choose the immediate mode and a
+short plan that the spacecraft will hold until the next onboard planning event.
 
 MISSION: Maximise observation data downlinked to ground while maintaining satellite
 health and safety.
@@ -25,7 +27,7 @@ AVAILABLE MODES:
 - payload_compress: Compress Jetson raw data by about 5:1.
 - payload_detect: Run CV detection on compressed observations (about 5 min each).
 - payload_send: Transfer Jetson products to the OBC at about 8 Mbps.
-- communication: Downlink OBC data at 50 kbps effective, only during a ground pass.
+- communication: Downlink OBC data at 50 kbps effective while the station is visible.
 - safe: Minimal-power anomaly mode; the environment may enforce it.
 
 DATA PIPELINE: Jetson raw -> Jetson compressed -> OBC -> ground.
@@ -37,8 +39,10 @@ CONSTRAINTS:
   including a policy-requested safe mode, are ignored and are not queued.
   Environment-enforced safe mode immediately aborts the slew. Once settling is complete,
   command the target mode again to begin productive operations.
-- Put communication only where the contact lookahead reports a ground pass.
-- Prepare OBC data before a pass and respect finite pass downlink capacity.
+- Communication transfers data only while the ground station is visible. Commanding it
+  earlier only points the antenna, which also needs the 135 s settling.
+- Passes occur only a few times per day and last a few minutes, so keep OBC data
+  ready and use a visible pass whenever OBC data is waiting.
 - Keep reasoning concise and do not invent telemetry.
 
 OUTPUT FORMAT: JSON only:
@@ -64,14 +68,24 @@ text outside the JSON object."""
 )
 
 
-def _active_offsets(values: Any, *, limit: int) -> list[int]:
-    if not isinstance(values, (list, tuple)):
-        return []
-    return [index for index, value in enumerate(values[:limit]) if bool(value)]
+def _station_line(state: dict[str, Any]) -> str:
+    visible = "visible now" if state.get("station_visible", False) else "not visible now"
+    navigation = state.get("navigation") or {}
+    if not navigation.get("valid", False):
+        return f"Ground station: {visible}"
+    return f"Ground station: {visible} (elevation {navigation['station_elevation_deg']:.1f} deg)"
+
+
+def _last_interval_line(state: dict[str, Any]) -> str:
+    last = state.get("last_interval") or {}
+    if not last:
+        return "Last interval: none"
+    outcome = "accepted" if last.get("action_accepted", True) else "rejected"
+    return f"Last interval: executed {last.get('executed_mode', 'charging')}, {outcome}"
 
 
 def format_onboard_schedule_prompt(state: dict[str, Any], remaining_steps: int) -> str:
-    """Format fresh telemetry and almanac data for one onboard planning event."""
+    """Format fresh onboard telemetry for one planning event; no event forecast."""
 
     if not state:
         return (
@@ -79,24 +93,22 @@ def format_onboard_schedule_prompt(state: dict[str, Any], remaining_steps: int) 
             f'{{"mode":"charging","schedule":[["charging",{remaining_steps}]],'
             '"rationale":"no state"}'
         )
-    horizon = max(1, remaining_steps + 1)
-    contacts = _active_offsets(state.get("planning_contact_seconds"), limit=horizon)
-    sunlight = _active_offsets(state.get("planning_sunlight"), limit=horizon)
     feasible = ", ".join(_get_feasible_modes(state))
+    settling = int(float(state.get("transition_steps_remaining", 0)))
     return "\n".join(
         [
             f"PLAN NOW PLUS THE NEXT {remaining_steps} HELD STEPS (60 s each).",
-            "Offsets use 0 for the immediate action.",
             f"Battery SoC: {float(state.get('battery_soc', 0.5)):.3f}",
             f"Health: {state.get('health_status', 'nominal')}",
             f"Current mode: {state.get('current_mode', 'charging')}",
-            f"Contact-active offsets: {contacts or 'none'}",
-            f"Sunlight offsets: {sunlight or 'none'}",
+            f"Attitude settling: {settling} steps remaining "
+            f"(target {state.get('previous_mode', 'charging')})",
+            _last_interval_line(state),
+            _station_line(state),
+            f"Sunlight now: {'yes' if state.get('in_sunlight', False) else 'no'}",
             f"Jetson raw: {float(state.get('jetson_raw_mb', 0.0)):.2f} MB",
             f"Jetson compressed: {float(state.get('jetson_compressed_mb', 0.0)):.2f} MB",
             f"OBC ready: {float(state.get('obc_data_mb', 0.0)):.2f} MB",
-            "Next-pass achievable downlink: "
-            f"{float(state.get('achievable_downlink_mb', 0.0)):.2f} MB",
             f"Feasible immediate modes: {feasible}",
             f"Pipeline bottleneck: {_get_pipeline_bottleneck(state)}",
             "Return the immediate mode and subsequent schedule as JSON.",

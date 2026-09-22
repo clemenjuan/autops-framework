@@ -52,6 +52,12 @@ def _number(state: dict[str, Any], key: str, default: float) -> float:
         return default
 
 
+def _has_almanac(state: dict[str, Any]) -> bool:
+    """Ground records carry the contact almanac; the onboard view does not."""
+
+    return "contact_window_seconds" in state
+
+
 def _get_pipeline_bottleneck(state: dict[str, Any]) -> str:
     if _number(state, "uncompressed_observations", 0.0) > 0:
         return "compression_needed"
@@ -93,13 +99,21 @@ def check_constraints(state: dict[str, Any], proposed_mode: str = "charging") ->
         )
 
     if proposed_mode == "communication":
-        contact = bool(state.get("ground_pass_active", False))
-        contact_s = _number(state, "contact_window_seconds", 0.0)
-        if not contact or contact_s <= 0:
-            violations.append(
-                {"constraint": "ground_pass", "reason": "No positive contact window is active."}
-            )
         productive = _number(state, "obc_data_mb", 0.0) > 0
+        if _has_almanac(state):
+            contact = bool(state.get("ground_pass_active", False))
+            if not contact or _number(state, "contact_window_seconds", 0.0) <= 0:
+                violations.append(
+                    {"constraint": "ground_pass", "reason": "No positive contact window is active."}
+                )
+        elif not state.get("station_visible", False):
+            productive = False
+            warnings.append(
+                {
+                    "constraint": "station_visibility",
+                    "reason": "Station not visible now; communication only points the antenna.",
+                }
+            )
     elif proposed_mode == "payload_observe":
         capacity = _number(state, "jetson_capacity_mb", 249036.8)
         stored = _number(state, "jetson_raw_mb", 0.0) + _number(state, "jetson_compressed_mb", 0.0)
@@ -133,14 +147,25 @@ def _get_feasible_modes(state: dict[str, Any]) -> list[str]:
 
 
 def evaluate_plan(state: dict[str, Any], proposed_mode: str = "charging") -> dict[str, Any]:
-    """Score only incremental physically deliverable value, with no mode bonus."""
+    """Score only incremental physically deliverable value, with no mode bonus.
+
+    With the ground almanac, value is relative to pass capacity. In the onboard
+    view, which has no pass forecast, it is relative to one step of link capacity.
+    """
 
     constraints = check_constraints(state, proposed_mode)
     utility = 0.0
     progress_mb = 0.0
     if constraints["feasible"] and constraints["productive_this_step"]:
+        link_mb = (
+            _number(state, "downlink_rate_kbps", 50.0) * _number(state, "step_duration_s", 60.0)
+        ) / 8000.0
         if proposed_mode == "communication":
-            available = _number(state, "remaining_achievable_downlink_mb", 0.0)
+            available = (
+                _number(state, "remaining_achievable_downlink_mb", 0.0)
+                if _has_almanac(state)
+                else link_mb
+            )
             progress_mb = min(_number(state, "obc_data_mb", 0.0), max(0.0, available))
             utility = progress_mb / max(available, 1e-12)
         elif proposed_mode == "payload_send":
@@ -161,12 +186,17 @@ def evaluate_plan(state: dict[str, Any], proposed_mode: str = "charging") -> dic
             progress_mb = _number(state, "detection_metadata_mb", 0.01) / max(
                 _number(state, "detection_steps", 5.0), 1.0
             )
-        future_capacity = max(
-            _number(state, "future_pass_capacity_mb", 0.0),
-            _number(state, "achievable_downlink_mb", 0.0),
+        # The onboard view has no pass capacity; one step of link capacity is the scale.
+        reference = (
+            max(
+                _number(state, "future_pass_capacity_mb", 0.0),
+                _number(state, "achievable_downlink_mb", 0.0),
+            )
+            if _has_almanac(state)
+            else link_mb
         )
-        if proposed_mode != "communication" and future_capacity > 0:
-            utility = min(progress_mb, future_capacity) / future_capacity
+        if proposed_mode != "communication" and reference > 0:
+            utility = min(progress_mb, reference) / reference
     risks = [item["reason"] for item in constraints["violations"] + constraints["warnings"]]
     return {
         "proposed_mode": proposed_mode,

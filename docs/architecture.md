@@ -122,11 +122,15 @@ The following are deliberately not inputs:
 Values without a simulated sensor or subsystem model, such as voltages, temperatures,
 attitude quaternions, pointing error, link lock, or fault diagnoses, are not invented.
 
-Onboard `lewm-cem` and onboard `symb` decide from this view. The onboard rules are
-therefore reactive: they communicate while the station is visible and have no pass or
-remaining-capacity forecast. Ground roles legitimately keep the pass almanac.
-`analytical-cem` keeps it as an oracle (see below). The onboard LLM planners still
-receive it until their prompts are revised under the same boundary.
+Onboard `lewm-cem`, `symb`, and the four onboard LLM planners decide from this view.
+The onboard rules are reactive: they communicate while the station is visible and have
+no pass or remaining-capacity forecast. Onboard LLM prompts state that no pass or
+eclipse forecast exists and report present station visibility, elevation, sunlight,
+settling, and the last interval's outcome. Their what-if tools treat communication
+before visibility as feasible antenna prepointing without transfer and scale value by
+one step of link capacity. Their symbolic shield admits communication with OBC data
+waiting, matching the CEM mask. Ground roles legitimately keep the pass almanac, and
+`analytical-cem` keeps it as an oracle (see below).
 
 Trace state rows are privileged simulator labels for probe targets and evaluation, never
 decision inputs. They include the future pass and eclipse countdowns, which are censored

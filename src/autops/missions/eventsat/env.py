@@ -18,6 +18,7 @@ from autops.missions.eventsat.physics import (
     planner_event_energy_wh,
     power_step,
     resolve_mode,
+    safety_required,
     settle_mode,
 )
 from autops.missions.eventsat.transitions import (
@@ -117,9 +118,19 @@ class EventSatEnvironment:
 
     def step(self, actions: dict[str, Any]) -> EnvironmentStep:
         requested, planner_active_s, planned = self._parse_action(actions)
-        resolved = self._resolve_mode(requested)
-        safety_safe = resolved == "safe"
-        effective, in_transition = self._settle(resolved)
+        mandatory_safe = safety_required(
+            battery_soc=self.state.battery_soc,
+            minimum_soc=float(self.config["power"]["battery"]["min_soc"]),
+            anomaly_active=self.state.active_anomaly is not None,
+        )
+        resolved = resolve_mode(
+            requested,
+            mandatory_safe=mandatory_safe,
+            battery_soc=self.state.battery_soc,
+            constraints=self.config["modes"].get("constraints", {}),
+        )
+        effective, in_transition = self._settle(resolved, mandatory_safe)
+        safety_safe = effective == "safe"
         sunlight = bool(self.orbit and self.orbit.is_in_sunlight(self.state.step))
         contact_s = float(self.orbit.contact_seconds(self.state.step)) if self.orbit else 0.0
         planner_energy_wh = (
@@ -244,16 +255,7 @@ class EventSatEnvironment:
         active_s = max(0.0, float(raw.get("planner_active_s", 0.0))) if planned else 0.0
         return mode, active_s, planned
 
-    def _resolve_mode(self, requested: str) -> str:
-        return resolve_mode(
-            requested,
-            battery_soc=self.state.battery_soc,
-            minimum_soc=float(self.config["power"]["battery"]["min_soc"]),
-            anomaly_active=self.state.active_anomaly is not None,
-            constraints=self.config["modes"].get("constraints", {}),
-        )
-
-    def _settle(self, resolved: str) -> tuple[str, bool]:
+    def _settle(self, resolved: str, mandatory_safe: bool) -> tuple[str, bool]:
         state = self.state
         effective, state.previous_mode, state.transition_steps_remaining, transitioning = (
             settle_mode(
@@ -262,6 +264,7 @@ class EventSatEnvironment:
                 state.transition_steps_remaining,
                 self.settling_steps,
                 self.maneuver_modes,
+                mandatory_safe=mandatory_safe,
             )
         )
         return effective, transitioning

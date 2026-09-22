@@ -104,7 +104,10 @@ unknown, inapplicable, reserved, or unimplemented fails validation before simula
 EventSat models a 6U event-camera spacecraft in a 400 km sun-synchronous orbit, one
 ground station, 60-second control steps, a 70 Wh battery, 16.8 W effective peak solar
 generation, a 50 kbps effective S-band downlink, and the three-pool raw/compressed/OBC
-pipeline. A 135-second slew is deliberately floored to two nonproductive steps. The
+pipeline. A 135-second slew is deliberately floored to two nonproductive steps. A slew
+keeps its initial target: commands issued while settling, including a policy-requested
+`safe`, are dropped rather than queued, and only environment-enforced safe mode aborts
+it. Productive operation begins when the target mode is commanded after settling. The
 optional orbital backend uses Orekit Eckstein-Hechler J2 propagation; the seeded
 fallback preserves eclipse/contact structure when Java is unavailable.
 

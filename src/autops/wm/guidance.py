@@ -17,6 +17,7 @@ import numpy as np
 from autops.missions.eventsat.physics import (
     advance_projected_battery,
     resolve_mode,
+    safety_required,
     settle_mode,
 )
 from autops.missions.eventsat.transitions import (
@@ -196,11 +197,16 @@ def _fallback(mask: np.ndarray, state: Mapping[str, Any]) -> int:
 
 
 def _resolved_action(state: dict[str, Any], requested: int, settling: int) -> int:
-    resolved = resolve_mode(
-        EVENTSAT_ACTIONS[requested],
-        battery_soc=_number(state, "battery_soc", 0.5),
+    battery_soc = _number(state, "battery_soc", 0.5)
+    mandatory_safe = safety_required(
+        battery_soc=battery_soc,
         minimum_soc=_number(state, "battery_min_soc", 0.2),
         anomaly_active=state.get("health_status", "nominal") != "nominal",
+    )
+    resolved = resolve_mode(
+        EVENTSAT_ACTIONS[requested],
+        mandatory_safe=mandatory_safe,
+        battery_soc=battery_soc,
         constraints=state.get("mode_constraints", {}),
     )
     state["forced"] = resolved != EVENTSAT_ACTIONS[requested]
@@ -210,6 +216,7 @@ def _resolved_action(state: dict[str, Any], requested: int, settling: int) -> in
         max(0, int(_number(state, "transition_steps_remaining"))),
         settling,
         set(state.get("attitude_maneuver_modes", ("payload_observe", "communication"))),
+        mandatory_safe=mandatory_safe,
     )
     state["previous_mode"] = previous
     state["transition_steps_remaining"] = remaining

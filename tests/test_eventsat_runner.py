@@ -289,3 +289,26 @@ def test_mandatory_safe_mode_preempts_attitude_settling(condition, remaining) ->
     assert env.state.total_observation_s == 0.0
     expected_load = config["power"]["consumption"]["safe"]["eclipse_w"]
     assert transition.info["gross_energy_consumed_wh"] == pytest.approx(expected_load / 60.0)
+
+
+@pytest.mark.parametrize("redirect", ["communication", "safe", "charging"])
+def test_slew_keeps_initial_target_and_drops_commands_while_settling(redirect) -> None:
+    config = deepcopy(expand_coordinate("eventsat/sas/ao/symb").mission_config)
+    config["anomalies"]["probability_per_step"] = 0.0
+    env = EventSatEnvironment(config, max_steps=8, prefer_orekit=False)
+    env.reset(42)
+    env.state.battery_soc = 0.9
+    commands = ["payload_observe", *[redirect] * (env.settling_steps - 1)]
+    for command in commands:
+        transition = env.step({"eventsat_0": {"mode": command}})
+        assert transition.info["in_transition"]
+        assert transition.info["resolved_mode"] == "charging"
+        assert not transition.info["safety_safe"]
+    assert env.state.transition_steps_remaining == 0
+    assert env.state.previous_mode == "payload_observe"
+    observed = env.step({"eventsat_0": {"mode": "payload_observe"}})
+    assert observed.info["resolved_mode"] == "payload_observe"
+    if redirect == "communication":
+        redirected = env.step({"eventsat_0": {"mode": "communication"}})
+        assert redirected.info["in_transition"]
+        assert redirected.info["resolved_mode"] == "charging"

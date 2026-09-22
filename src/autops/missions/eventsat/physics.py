@@ -19,17 +19,22 @@ from autops.missions.eventsat.transitions import total_storage_mb
 from autops.wm.schema import EVENTSAT_ACTIONS as MODES
 
 
+def safety_required(*, battery_soc: float, minimum_soc: float, anomaly_active: bool) -> bool:
+    """Return whether the environment must enforce safe mode this step."""
+
+    return anomaly_active or battery_soc <= minimum_soc
+
+
 def resolve_mode(
     requested: str,
     *,
+    mandatory_safe: bool,
     battery_soc: float,
-    minimum_soc: float,
-    anomaly_active: bool,
     constraints: Mapping[str, Any],
 ) -> str:
     """Apply mandatory safety before validating an optional mission command."""
 
-    if anomaly_active or battery_soc <= minimum_soc:
+    if mandatory_safe:
         return "safe"
     if requested not in MODES:
         return "charging"
@@ -39,20 +44,27 @@ def resolve_mode(
 
 
 def settle_mode(
-    resolved: str, previous: str, remaining: int, settling: int, maneuver_modes: set[str]
+    resolved: str,
+    target: str,
+    remaining: int,
+    settling: int,
+    maneuver_modes: set[str],
+    *,
+    mandatory_safe: bool,
 ) -> tuple[str, str, int, bool]:
-    """Return effective mode, pointing history, countdown, and transition flag."""
+    """Return effective mode, attitude target, countdown, and transition flag.
 
-    # Safety resolution is authoritative even while a maneuver is pending.
-    if resolved == "safe":
+    A slew fixes its target when it starts; commands issued while settling are
+    dropped, not queued. Only environment-enforced safety aborts the slew.
+    """
+
+    if mandatory_safe:
         return "safe", "safe", 0, False
     if remaining > 0:
-        remaining -= 1
-        return "charging", resolved if remaining == 0 else previous, remaining, True
-    maneuver = previous != resolved and (resolved in maneuver_modes or previous in maneuver_modes)
+        return "charging", target, remaining - 1, True
+    maneuver = target != resolved and (resolved in maneuver_modes or target in maneuver_modes)
     if maneuver and settling > 0:
-        remaining = settling - 1
-        return "charging", resolved if remaining == 0 else previous, remaining, True
+        return "charging", resolved, settling - 1, True
     return resolved, resolved, 0, False
 
 
@@ -77,7 +89,6 @@ class EventSatState:
     total_detections: int = 0
     total_contact_s: float = 0.0
     transition_steps_remaining: int = 0
-    transition_target: str | None = None
     active_anomaly: str | None = None
     forced_safe_steps: int = 0
     cumulative_gross_wh: float = 0.0

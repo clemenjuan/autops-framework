@@ -43,6 +43,7 @@ CONSTRAINTS:
 - Battery SoC must stay above 0.20 (hard limit) and above 0.35 (preferred).
 - Ground passes are limited windows; OBC data must be ready before pass starts.
 - ADCS settling takes 135 seconds when switching between modes with different attitudes.
+- An ongoing slew keeps its initial target. Ordinary commands received during settling, including a policy-requested safe mode, are ignored and are not queued. Environment-enforced safe mode immediately aborts the slew. Once settling is complete, command the target mode again to begin productive operations.
 - Ground-pass downlink capacity is finite at the effective 50 kbps S-band rate.
 - Anomalies force safe mode; you cannot override environment-enforced safe mode.
 
@@ -191,6 +192,7 @@ CONSTRAINTS:
 - Fresh telemetry reaches the ground planner only if the satellite actually communicates during a pass; otherwise future plans use stale state.
 - The schedule runs BETWEEN passes (no ground link), so do not put communication in the between-pass schedule.
 - ADCS settling costs ~135 s when switching between modes with different attitudes.
+- An ongoing slew keeps its initial target. Ordinary commands received during settling, including a policy-requested safe mode, are ignored and are not queued. Environment-enforced safe mode immediately aborts the slew. Once settling is complete, command the target mode again to begin productive operations.
 - Reserve battery near the end so the satellite is charged for the next pass.
 - The next ground pass has finite contact-limited downlink capacity; avoid over-observing.
 

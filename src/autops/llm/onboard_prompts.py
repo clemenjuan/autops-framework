@@ -33,6 +33,10 @@ DATA PIPELINE: Jetson raw -> Jetson compressed -> OBC -> ground.
 CONSTRAINTS:
 - Battery SoC must remain above 0.20 and preferably above 0.35.
 - ADCS settling takes 135 s across modes with different attitudes.
+- An ongoing slew keeps its initial target. Ordinary commands received during settling,
+  including a policy-requested safe mode, are ignored and are not queued.
+  Environment-enforced safe mode immediately aborts the slew. Once settling is complete,
+  command the target mode again to begin productive operations.
 - Put communication only where the contact lookahead reports a ground pass.
 - Prepare OBC data before a pass and respect finite pass downlink capacity.
 - Keep reasoning concise and do not invent telemetry.

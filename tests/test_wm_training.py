@@ -24,6 +24,8 @@ from autops.wm.training import (
     train_lewm,
 )
 
+OBS_DIM = len(EVENTSAT_OBSERVATIONS)
+
 
 def _source(seeds: tuple[int, ...]) -> TraceSource:
     return TraceSource(
@@ -62,7 +64,7 @@ def _trace(obs: np.ndarray) -> TraceDataset:
 
 
 def test_window_split_is_episode_disjoint_and_train_normalized() -> None:
-    split = split_episodes(5, train_fraction=0.6, seed=19)
+    split = split_episodes(range(5), train_fraction=0.6, seed=19)
     obs = np.zeros((5, 7, len(EVENTSAT_OBSERVATIONS)), dtype=np.float32)
     obs[np.asarray(split.train)] = 2.0
     obs[np.asarray(split.validation)] = 100.0
@@ -238,7 +240,7 @@ def test_training_restores_lowest_validation_weights(tmp_path, monkeypatch) -> N
     )
     result = training_module.train_lewm(
         trace,
-        model_config=LeWMConfig(obs_dim=25, action_dim=7),
+        model_config=LeWMConfig(obs_dim=OBS_DIM, action_dim=7),
         training_config=TrainingConfig(
             max_steps=2,
             warmup_steps=0,
@@ -267,7 +269,7 @@ def test_training_restores_lowest_validation_weights(tmp_path, monkeypatch) -> N
 def test_probe_override_target_belongs_to_incoming_transition() -> None:
     from autops.wm.probes import DEFAULT_ATTRIBUTES, build_eventsat_targets
 
-    trace = _trace(np.zeros((2, 4, 25), dtype=np.float32))
+    trace = _trace(np.zeros((2, 4, OBS_DIM), dtype=np.float32))
     trace.forced_mode[0] = [1, 0, 1, 0]
     trace.forced_mode[1] = [0, 1, 0, 1]
     targets = build_eventsat_targets(trace)

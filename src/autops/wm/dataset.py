@@ -51,19 +51,28 @@ class FeatureNormalizer:
 
 
 def split_episodes(
-    n_episodes: int, *, train_fraction: float = 0.9, seed: int = 3072
+    episode_groups: Sequence[int], *, train_fraction: float = 0.9, seed: int = 3072
 ) -> EpisodeSplit:
-    """Shuffle episode identities, never individual or overlapping windows."""
+    """Shuffle physical-episode groups, never individual or overlapping windows.
 
-    if n_episodes < 2:
-        raise ValueError("episode-disjoint validation requires at least two episodes")
+    ``episode_groups`` holds one launch seed per trace episode. Every policy's
+    realization of one seed stays on the same side, so repeated physical
+    episodes cannot leak across the split. With unique seeds this equals an
+    episode-index shuffle.
+    """
+
+    groups = [int(value) for value in episode_groups]
+    identities = list(dict.fromkeys(groups))
+    if len(identities) < 2:
+        raise ValueError("group-disjoint validation requires at least two episode groups")
     if not 0.0 < train_fraction < 1.0:
         raise ValueError("train_fraction must lie strictly between zero and one")
-    order = np.random.default_rng(seed).permutation(n_episodes)
-    n_train = min(n_episodes - 1, max(1, round(n_episodes * train_fraction)))
+    order = np.random.default_rng(seed).permutation(len(identities))
+    n_train = min(len(identities) - 1, max(1, round(len(identities) * train_fraction)))
+    train_groups = {identities[int(index)] for index in order[:n_train]}
     return EpisodeSplit(
-        train=tuple(sorted(int(v) for v in order[:n_train])),
-        validation=tuple(sorted(int(v) for v in order[n_train:])),
+        train=tuple(index for index, group in enumerate(groups) if group in train_groups),
+        validation=tuple(index for index, group in enumerate(groups) if group not in train_groups),
     )
 
 
@@ -159,7 +168,7 @@ def build_window_split(
 
     if history <= 0 or predictions <= 0:
         raise ValueError("history and predictions must be positive")
-    episodes = split_episodes(trace.n_episodes, train_fraction=train_fraction, seed=seed)
+    episodes = split_episodes(trace.episode_seed, train_fraction=train_fraction, seed=seed)
     normalizer = fit_normalizer(trace, episodes.train)
     window = history + predictions
     return WindowSplit(

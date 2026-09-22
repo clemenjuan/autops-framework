@@ -9,13 +9,15 @@ from autops.core.probe_audit import audit_probe_decodability
 from autops.core.workflows import fit_planner_artifact
 from autops.wm.artifact import checkpoint_sha256, load_artifact
 from autops.wm.jepa import LeWMConfig
-from autops.wm.schema import load_trace, write_trace
+from autops.wm.schema import EVENTSAT_OBSERVATIONS, load_trace, write_trace
 from autops.wm.training import (
     TrainingConfig,
     load_checkpoint,
     save_checkpoint,
     train_lewm,
 )
+
+OBS_DIM = len(EVENTSAT_OBSERVATIONS)
 
 
 def test_artifact_and_latent_audit_reuse_exact_checkpoint_data_contract(tmp_path) -> None:
@@ -29,7 +31,7 @@ def test_artifact_and_latent_audit_reuse_exact_checkpoint_data_contract(tmp_path
     result = train_lewm(
         trace,
         model_config=LeWMConfig(
-            obs_dim=25,
+            obs_dim=OBS_DIM,
             action_dim=7,
             embed_dim=8,
             encoder_hidden_dim=8,

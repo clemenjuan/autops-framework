@@ -61,10 +61,11 @@ def _load_probe_features(trace: Any, checkpoint_path: str | Path, settings: _Aud
 def _audit_split(trace: Any, settings: _AuditSettings) -> tuple[Any, int]:
     if settings.validation_episodes < 1:
         raise ValueError("validation_episodes must be positive")
-    validation_count = min(settings.validation_episodes, trace.n_episodes - 1)
+    groups = len(set(trace.episode_seed.tolist()))
+    validation_count = min(settings.validation_episodes, groups - 1)
     split = split_episodes(
-        trace.n_episodes,
-        train_fraction=(trace.n_episodes - validation_count) / trace.n_episodes,
+        trace.episode_seed,
+        train_fraction=(groups - validation_count) / groups,
         seed=settings.seed,
     )
     return split, validation_count

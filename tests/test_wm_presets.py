@@ -15,6 +15,8 @@ from autops.wm.cem import CEMConfig
 from autops.wm.probes import DEFAULT_ATTRIBUTES
 from autops.wm.schema import EVENTSAT_ACTIONS, EVENTSAT_OBSERVATIONS
 
+OBS_DIM = len(EVENTSAT_OBSERVATIONS)
+
 
 def _evidence(attributes: tuple[str, ...]) -> ProbeEvidenceContract:
     zeros = {name: 0.0 for name in attributes}
@@ -27,7 +29,7 @@ def _artifact() -> PlannerArtifact:
         model=ModelContract(
             checkpoint="model.pt",
             mission="eventsat",
-            obs_dim=25,
+            obs_dim=OBS_DIM,
             action_dim=7,
             embed_dim=8,
             history=3,
@@ -37,8 +39,8 @@ def _artifact() -> PlannerArtifact:
             checkpoint_sha256="0" * 64,
         ),
         normalization=NormalizationContract(
-            obs_mean=(0.0,) * 25,
-            obs_std=(1.0,) * 25,
+            obs_mean=(0.0,) * OBS_DIM,
+            obs_std=(1.0,) * OBS_DIM,
             action_mean=(0.0,) * 7,
             action_std=(1.0,) * 7,
         ),

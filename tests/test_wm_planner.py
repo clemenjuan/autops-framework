@@ -22,6 +22,8 @@ from autops.wm.artifact import (
 from autops.wm.cem import CEMConfig
 from autops.wm.schema import EVENTSAT_ACTIONS, EVENTSAT_OBSERVATIONS
 
+OBS_DIM = len(EVENTSAT_OBSERVATIONS)
+
 
 def _evidence(attributes: tuple[str, ...]) -> ProbeEvidenceContract:
     zeros = {name: 0.0 for name in attributes}
@@ -38,7 +40,7 @@ def _artifact(
         model=ModelContract(
             checkpoint="weights/lewm.ckpt",
             mission="eventsat",
-            obs_dim=25,
+            obs_dim=OBS_DIM,
             action_dim=7,
             embed_dim=4,
             history=3,
@@ -48,8 +50,8 @@ def _artifact(
             checkpoint_sha256="0" * 64,
         ),
         normalization=NormalizationContract(
-            obs_mean=(0.0,) * 25,
-            obs_std=(1.0,) * 25,
+            obs_mean=(0.0,) * OBS_DIM,
+            obs_std=(1.0,) * OBS_DIM,
             action_mean=(0.0,) * 7,
             action_std=(1.0,) * 7,
         ),
@@ -76,7 +78,7 @@ def _artifact(
 
 def _state(**updates: Any) -> dict[str, Any]:
     state: dict[str, Any] = {
-        "obs25": np.zeros(25, dtype=np.float32),
+        "obs_vector": np.zeros(OBS_DIM, dtype=np.float32),
         "battery_soc": 0.8,
         "health_status": "nominal",
         "physical_ground_pass_active": False,
@@ -216,7 +218,7 @@ def test_plan_hold_reuses_actions_without_calling_rollout_scorer() -> None:
     calls: list[tuple[int, ...]] = []
 
     def scorer(history: dict[str, Any], sequences: np.ndarray) -> np.ndarray:
-        assert history["obs"].shape == (3, 25)
+        assert history["obs"].shape == (3, OBS_DIM)
         assert history["action"].shape == (3, 7)
         calls.append(tuple(sequences[:, 0]))
         return (sequences == 2).sum(axis=1).astype(np.float32)
@@ -253,7 +255,7 @@ def test_probe_target_scale_normalization_is_enabled_by_default() -> None:
     assert _mode(unnormalized.select_action(_context(_state()))) == "charging"
 
 
-def test_downlink_reflex_requires_physical_contact_and_obc_data() -> None:
+def test_downlink_reflex_requires_station_visibility_and_obc_data() -> None:
     calls = 0
 
     def charging_score(history: dict[str, Any], sequences: np.ndarray) -> np.ndarray:
@@ -271,7 +273,7 @@ def test_downlink_reflex_requires_physical_contact_and_obc_data() -> None:
 
     physical = _planner(charging_score)
     physical_action = physical.select_action(
-        _context(_state(physical_ground_pass_active=True, obc_data_mb=5.0))
+        _context(_state(station_visible=True, obc_data_mb=5.0))
     )
     assert _mode(physical_action) == "communication"
     assert physical_action["eventsat_0"]["jetson_planned"] is False
@@ -311,9 +313,7 @@ def test_reflex_overrides_and_consumes_a_held_action() -> None:
 
     planner = _planner(payload_score)
     planner.select_action(_context(_state()))
-    reflex = planner.select_action(
-        _context(_state(physical_ground_pass_active=True, obc_data_mb=4.0), 1)
-    )
+    reflex = planner.select_action(_context(_state(station_visible=True, obc_data_mb=4.0), 1))
     after_reflex = planner.select_action(_context(_state(), 2))
 
     assert _mode(reflex) == "communication"
@@ -339,14 +339,14 @@ def test_checkpoint_load_rejects_artifact_semantic_mismatch(
     semantics[field] = value
     contract = SimpleNamespace(
         model_config=SimpleNamespace(
-            obs_dim=25,
+            obs_dim=OBS_DIM,
             action_dim=7,
             embed_dim=4,
             history=3,
         ),
         normalizer=SimpleNamespace(
-            obs_mean=np.zeros(25, dtype=np.float32),
-            obs_std=np.ones(25, dtype=np.float32),
+            obs_mean=np.zeros(OBS_DIM, dtype=np.float32),
+            obs_std=np.ones(OBS_DIM, dtype=np.float32),
             action_mean=np.zeros(7, dtype=np.float32),
             action_std=np.ones(7, dtype=np.float32),
         ),
@@ -380,7 +380,7 @@ def test_compute_diagnostics_are_timed_resettable_and_identity_bound(monkeypatch
     planner.reset(9)
     planner.select_action(_context(_state(), 0))
     planner.select_action(_context(_state(), 1))
-    planner.select_action(_context(_state(physical_ground_pass_active=True, obc_data_mb=4.0), 2))
+    planner.select_action(_context(_state(station_visible=True, obc_data_mb=4.0), 2))
     planner.select_action(_context(_state(), 3))
 
     diagnostics = planner.diagnostics()

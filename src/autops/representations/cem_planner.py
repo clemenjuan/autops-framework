@@ -2,10 +2,15 @@
 
 The base class owns only deployment concerns: observation history, mission
 action masks, plan-and-hold execution, executable-candidate projection, and
-the physical-contact downlink reflex. Artifact validation, CEM, and scoring
+the station-visibility downlink reflex. Artifact validation, CEM, and scoring
 primitives remain in ``autops.wm``. Leaves declare ``token``, ``scorer_kind``,
-``propagation_model``, and ``uses_checkpoint``, and implement
-``_score_candidates``.
+``propagation_model``, ``uses_checkpoint``, and ``forecast_oracle``, and
+implement ``_score_candidates``.
+
+A leaf without ``forecast_oracle`` decides from the onboard view only: every
+mask, projection, guidance, seed, and shaping term then sees present geometry
+and no future contact or sunlight. The oracle leaf receives the exact almanac
+and is therefore an upper-bound reference, not an onboard-realizable peer.
 """
 
 from __future__ import annotations
@@ -20,7 +25,8 @@ import numpy as np
 
 from autops.core.plugin import Representation
 from autops.core.types import DecisionContext, SpaceSpec
-from autops.missions.eventsat.physics import MODES, encode_vectors
+from autops.missions.eventsat.observation import encode_vectors, onboard_view
+from autops.missions.eventsat.physics import MODES
 from autops.wm.artifact import PlannerArtifact, load_artifact
 from autops.wm.cem import CEMConfig, categorical_cem, initial_probabilities
 from autops.wm.compute import PlannerComputeEvidence
@@ -78,8 +84,9 @@ class EventSatCEMBase(Representation):
     scorer_kind: str
     propagation_model: str
     uses_checkpoint: bool
+    forecast_oracle: bool
 
-    observation_space = SpaceSpec((25,), "float32", -1.0, 1.0)
+    observation_space = SpaceSpec((len(EVENTSAT_OBSERVATIONS),), "float32", -1.0, 1.0)
     action_space = SpaceSpec((7,), "int64", 0, 1, MODES)
 
     def __init__(self, config: dict[str, Any] | None = None) -> None:
@@ -92,8 +99,6 @@ class EventSatCEMBase(Representation):
             raise ValueError(f"EventSat {self.token} requires the canonical seven-action order")
         if self.artifact.model.observation_names != EVENTSAT_OBSERVATIONS:
             raise ValueError(f"EventSat {self.token} requires the canonical observation semantics")
-        if self.artifact.model.obs_dim != 25:
-            raise ValueError(f"EventSat {self.token} requires the canonical 25D observation")
         self.cem = _effective_cem(self.artifact, self.config)
         self._normalize_attribute_scale = bool(
             self.config.get("normalize_attribute_scale", self.artifact.normalize_attribute_scale)
@@ -140,6 +145,7 @@ class EventSatCEMBase(Representation):
             "scorer_kind": self.scorer_kind,
             "propagation_model": self.propagation_model,
             "uses_checkpoint": self.uses_checkpoint,
+            "forecast_oracle": self.forecast_oracle,
             "planner_controls": {key: self.config[key] for key in self.artifact.planner_controls},
             "target_definition_version": self.artifact.target_definition_version,
         }
@@ -173,9 +179,11 @@ class EventSatCEMBase(Representation):
 
     def encode_observation(self, observation: dict[str, Any]) -> dict[str, Any]:
         obs, _, raw = encode_vectors(observation)
+        if not self.forecast_oracle:
+            raw = onboard_view(raw)
         return {
             **raw,
-            "obs25": obs,
+            "obs_vector": obs,
             "timestep": int(observation.get("step", 0)),
             "step_duration_s": float(
                 raw.get("step_duration_s", self.config.get("step_duration_s", 60.0))
@@ -203,7 +211,7 @@ class EventSatCEMBase(Representation):
             return self._choose(
                 self._action_index["communication"],
                 planned=False,
-                rationale="physical-contact OBC downlink reflex",
+                rationale="station-visible OBC downlink reflex",
             )
         if held is not None:
             self._compute.held_action_steps += 1
@@ -298,7 +306,7 @@ class EventSatCEMBase(Representation):
         return weights.astype(np.float64), numeric
 
     def _append_history(self, state: Mapping[str, Any]) -> None:
-        observation = np.asarray(state.get("obs25"), dtype=np.float32).reshape(-1)
+        observation = np.asarray(state.get("obs_vector"), dtype=np.float32).reshape(-1)
         if observation.shape != (self.artifact.model.obs_dim,):
             raise ValueError("encoded observation does not match artifact.model.obs_dim")
         action = np.eye(self.artifact.model.action_dim, dtype=np.float32)[self._last_action]
@@ -378,7 +386,7 @@ class EventSatCEMBase(Representation):
     def _should_reflex(self, state: Mapping[str, Any], mask: np.ndarray) -> bool:
         return bool(
             self._downlink_reflex
-            and state.get("physical_ground_pass_active", False)
+            and state.get("station_visible", False)
             and _number(state, "obc_data_mb") > 0.01
             and mask[self._action_index["communication"]]
         )

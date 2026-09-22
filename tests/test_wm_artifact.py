@@ -18,6 +18,8 @@ from autops.wm.artifact import (
 from autops.wm.cem import CEMConfig
 from autops.wm.schema import EVENTSAT_ACTIONS, EVENTSAT_OBSERVATIONS
 
+OBS_DIM = len(EVENTSAT_OBSERVATIONS)
+
 
 def _evidence(attributes: tuple[str, ...]) -> ProbeEvidenceContract:
     zeros = {name: 0.0 for name in attributes}
@@ -39,7 +41,7 @@ def _artifact() -> PlannerArtifact:
         model=ModelContract(
             checkpoint="weights/lewm.ckpt",
             mission="eventsat",
-            obs_dim=25,
+            obs_dim=OBS_DIM,
             action_dim=7,
             embed_dim=192,
             history=3,
@@ -49,8 +51,8 @@ def _artifact() -> PlannerArtifact:
             checkpoint_sha256=hashlib.sha256(b"checkpoint").hexdigest(),
         ),
         normalization=NormalizationContract(
-            obs_mean=(0.0,) * 25,
-            obs_std=(1.0,) * 25,
+            obs_mean=(0.0,) * OBS_DIM,
+            obs_std=(1.0,) * OBS_DIM,
             action_mean=(0.0,) * 7,
             action_std=(1.0,) * 7,
         ),
@@ -91,7 +93,7 @@ def test_artifact_rejects_absolute_or_escaping_checkpoint_paths():
         ModelContract(
             "/tmp/model.ckpt",
             "eventsat",
-            25,
+            OBS_DIM,
             7,
             192,
             3,
@@ -104,7 +106,7 @@ def test_artifact_rejects_absolute_or_escaping_checkpoint_paths():
         ModelContract(
             "../model.ckpt",
             "eventsat",
-            25,
+            OBS_DIM,
             7,
             192,
             3,

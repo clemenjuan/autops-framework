@@ -5,6 +5,10 @@ from the exact projected EventSat transitions over the orbit-derived almanac,
 isolating propagation-model quality from the optimizer and executable
 candidates. It requires no torch checkpoint at scoring time; the artifact
 still binds the matched comparison's provenance.
+
+It is a forecast oracle: it receives the exact future contact and sunlight
+arrays that the learned leaf must infer, and uses the same transitions as the
+truth environment. Its results are an upper bound, not an onboard peer.
 """
 
 from __future__ import annotations
@@ -29,6 +33,7 @@ class EventSatAnalyticalCEM(EventSatCEMBase):
     scorer_kind = "analytical-terminal"
     propagation_model = "orbit-almanac+eventsat-physics"
     uses_checkpoint = False
+    forecast_oracle = True
 
     def __init__(self, config: dict[str, Any] | None = None) -> None:
         if config is not None and config.get("rollout_scorer") is not None:

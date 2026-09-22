@@ -124,6 +124,7 @@ def _checkpoint_sections(
             "trace_sha256",
             "n_episodes",
             "n_steps",
+            "episode_seeds",
             "train_episodes",
             "validation_episodes",
             "normalizer",
@@ -192,6 +193,7 @@ def checkpoint_contract_kwargs(
         "trace_sha256": str(data["trace_sha256"]),
         "n_episodes": int(data["n_episodes"]),
         "n_steps": int(data["n_steps"]),
+        "episode_seeds": tuple(int(value) for value in data["episode_seeds"]),
         "episodes": EpisodeSplit(
             train=tuple(int(value) for value in data["train_episodes"]),
             validation=tuple(int(value) for value in data["validation_episodes"]),

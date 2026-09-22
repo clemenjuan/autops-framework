@@ -33,7 +33,7 @@ matrix coordinate + mission YAML + overrides
 
 The environment is the only source of physical state. Ground paradigms receive delayed
 resource/health state while deterministic almanac timing can be refreshed at a contact
-boundary. An RF transfer still requires physical contact. AO decides locally; AH has
+boundary. Onboard learned planning sees only the onboard information boundary below. An RF transfer still requires physical contact. AO decides locally; AH has
 independent onboard and ground cores with explicit promotion and arbitration. These
 authority boundaries reflect the operational allocation problem described by Castano
 et al. [1], rather than treating autonomy as a single scalar level.
@@ -83,20 +83,70 @@ walks the built-in representation package, the requested mission package only, a
 `SpaceSpec` exposes the observation/action boundary a later Gymnasium/RLlib adapter can
 use without adding Gymnasium to the base install.
 
+## EventSat information boundary
+
+A decision record at step `t` contains only information the spacecraft could hold by
+`t`. `autops.missions.eventsat.observation` owns that boundary and its vector encoding;
+`autops.wm.schema.EVENTSAT_OBSERVATIONS` fixes the 46 input names and order.
+
+| Group | Inputs | Encoding |
+|---|---|---|
+| Navigation | Earth-fixed (ITRF, IERS 2010) position and coordinate velocity | km / 7000; km s⁻¹ / 8 |
+| Present geometry | Sun unit vector in the same frame; station elevation; station visible; in sunlight | unit vector; sin(elevation); flags |
+| Resources and health | battery state of charge; OBC, raw, and compressed pool fills; health nominal | fractions; flag |
+| Payload processing | unprocessed and undetected product counts; compression and detection progress | log(1+n) / log(1+pool capacity in products); fraction of job duration |
+| Attitude and command feedback | settling remaining; last command forced to safe or to charging; last action accepted; executed mode; attitude target | fraction of settling time; flags; two one-hot blocks |
+| Last-interval outcome | product captured; compression and detection completed; bytes moved to the OBC; bytes downlinked; net and planner energy | fraction of one product or of one step's link capacity; energy / one step of peak solar generation |
+
+Navigation is an ideal GNSS position-velocity-time fix sampled every step from the same
+Orekit propagation as the episode [6, 7]. It is not a receiver model: no noise, delay,
+outage, or fix age is simulated. The seeded fallback has no state-derived orbit, reports
+the fix as invalid, and encodes zeros; it is unsuitable for navigation-learning corpora.
+Sun direction and station elevation stand for onboard-computable ephemeris and known
+station geometry. Station visibility and sunlight are instantaneous at the step start;
+the illumination flag is geometric, not a measured power estimate.
+
+The following are deliberately not inputs:
+
+- elapsed-time surrogates: nominal orbital phase, episode progress, cumulative totals,
+  and the absolute date (the scenario uses one start epoch; time of day and season reach
+  the model through the Earth-fixed Sun direction);
+- future-event information: pass and eclipse countdowns, remaining pass duration,
+  next-pass and whole-episode transfer capacity, and contact or sunlight arrays;
+- declared constants such as capacities, rates, job durations, and station coordinates,
+  which are identical in every trace row and instead scale the inputs and parameterize
+  the planner;
+- the previous requested command, which the model already receives as its action input;
+- values that are ideal constants in this simulator (navigation validity and age).
+
+Values without a simulated sensor or subsystem model, such as voltages, temperatures,
+attitude quaternions, pointing error, link lock, or fault diagnoses, are not invented.
+
+Trace state rows are privileged simulator labels for probe targets and evaluation, never
+decision inputs. They include the future pass and eclipse countdowns, which are censored
+as `-1` when no later event lies within the recorded episode. Contact labels distinguish
+instantaneous station visibility, physical contact seconds during the coming step, and
+the settling-lead `contact_window_active` used by the communication-opportunity target.
+
 ## World-model path
 
 The trace row stores the pre-transition observation/state and requested one-hot action;
 reward, resolved action, and forced flag describe that row's transition. The next row is
-the resulting observation. EventSat uses 25 observations, 25 state attributes, and 7
-actions. SSA adds a satellite axis and uses its canonical 6-action order. NPZ files are
-pickle-free and carry names, axes, episode IDs, seeds, and a versioned schema.
+the resulting observation. EventSat trace v2 uses the 46 observations above, 25 state
+labels, and 7 actions. SSA adds a satellite axis and uses its canonical 6-action order.
+NPZ files are pickle-free and carry names, axes, episode IDs, seeds, and a versioned
+schema. Older traces, checkpoints, and planner artifacts are rejected: a new observation
+contract requires re-export, retraining, and probe refitting, never padding or relabeling.
 
+Training and validation split launch seeds, not episode indices: every policy's
+realization of one physical episode stays on one side, and checkpoint v3 records the
+per-episode seeds that define its split. With unique seeds this equals an episode shuffle.
 Dataset windows never cross episode boundaries. LeWM uses a 192-dimensional embedding
 and history 3 with a JEPA-style action-conditioned objective. Probes are affine
 (`W`, `b`) and store target means/standard deviations plus degenerate-target labels.
 The relocatable planner artifact contains those probes, normalisation, action names,
 relative checkpoint path, CEM parameters, and all policy controls (reserve thresholds,
-reflexes, guidance, and shaping). The v4 artifact binds these settings at probe-fit time;
+reflexes, guidance, and shaping). The v5 artifact binds these settings at probe-fit time;
 explicit representation overrides remain part of the experiment configuration. Evaluation
 executes the same runner and representation as closed-loop planning. This representation follows the world-model control pattern
 demonstrated by Hafner et al. [2]; the exact AUTOPS contract is deliberately narrower
@@ -112,8 +162,17 @@ each search. Separate analytical and learned runs adapt their later candidate ba
 their own scores; identical seeds do not imply identical banks throughout a run. Held-action fallbacks remain as a runtime guard and report their own
 repair rate.
 
+The two CEM leaves have different information. `lewm-cem` receives only the onboard
+view: its mask, projection, guidance, pipeline seed, and shaping know present station
+visibility but no future contact, hold current sunlight constant, and may command
+communication before visibility for prepointing, while the environment still gates every
+transfer on physical contact. The station-visibility downlink reflex is common to both.
+
 The `analytical-cem` reference [3, 4, 5] replaces only the latent rollout/readout with
-canonical terminal attributes computed from that projection. Its exogenous contact and sunlight
+canonical terminal attributes computed from that projection. It is a forecast oracle:
+it receives the exact contact and sunlight arrays that the learned leaf must infer and
+uses the same transitions as the truth environment, so its results are an upper bound,
+not an onboard-realizable peer. Its exogenous contact and sunlight
 arrays are generated by the environment's active orbital backend (Orekit for paper
 runs). Execution and trace export size these arrays from the effective CEM horizon,
 including the terminal settling margin; explicit forecasts that are too short are
@@ -131,9 +190,8 @@ Only mandatory safe mode (anomaly or critical battery) preempts and cancels pend
 settling, in both truth and candidate projection. Only safety resolution contributes to the projected forced flag. Probe-target v2 aligns
 that flag with the incoming transition: the label for state `s_t` uses the override from
 `a_(t-1)`, and reset has no override. Contact opportunity refers to the terminal state's
-physical or settling-lead contact window. The 25D trace schema and M-01…M-14 are unchanged.
-A v3 artifact must be refitted with `train probes`; changing its version string cannot
-migrate its fitted weights. Existing checkpoints remain reusable with their bound trace.
+physical or settling-lead contact window. M-01…M-14 are unchanged. Changing an artifact
+or checkpoint version string cannot migrate fitted weights.
 
 Terminal affine remains the deployed readout until selection-level evidence justifies a
 change. `autops.wm.scoring.candidate_selection_metrics` compares terminal-affine,
@@ -236,3 +294,9 @@ Tracked source and public documentation contain no service endpoint or credentia
    [paper](https://people.eecs.berkeley.edu/~brecht/l4dc2020/papers/bharadhwaj20.pdf)
 5. B. Amos and D. Yarats, “The Differentiable Cross-Entropy Method,” ICML, 2020.
    [PMLR v119](https://proceedings.mlr.press/v119/amos20a/amos20a.pdf)
+6. NASA Small Spacecraft Systems Virtual Institute, “State-of-the-Art of Small
+   Spacecraft Technology: Guidance, Navigation, and Control.”
+   [nasa.gov](https://www.nasa.gov/smallsat-institute/sst-soa/guidance-navigation-and-control/)
+7. A. P. M. Chiaradia, H. K. Kuga, and A. F. B. A. Prado, “Onboard and Real-Time
+   Artificial Satellite Orbit Determination Using GPS,” *Mathematical Problems in
+   Engineering*, 2013. [doi:10.1155/2013/530516](https://doi.org/10.1155/2013/530516)

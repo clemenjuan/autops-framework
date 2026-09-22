@@ -31,6 +31,7 @@ class EventSatLeWMCEM(EventSatCEMBase):
     scorer_kind = "latent-terminal-affine"
     propagation_model = "lewm-recursive-rollout"
     uses_checkpoint = True
+    forecast_oracle = False
 
     def __init__(self, config: dict[str, Any] | None = None) -> None:
         super().__init__(config)

@@ -38,7 +38,7 @@ from autops.wm.schema import (
     SSA_OBSERVATIONS,
 )
 
-ARTIFACT_SCHEMA_VERSION = "autops.lewm.planner/v4"
+ARTIFACT_SCHEMA_VERSION = "autops.lewm.planner/v5"
 
 
 def checkpoint_sha256(path_like: str | Path) -> str:
@@ -344,7 +344,10 @@ class PlannerArtifact:
 
     def __post_init__(self) -> None:
         if self.schema_version != ARTIFACT_SCHEMA_VERSION:
-            raise ValueError(f"unsupported planner artifact {self.schema_version!r}")
+            raise ValueError(
+                f"unsupported planner artifact {self.schema_version!r}; "
+                "retrain the checkpoint and refit probes"
+            )
         if self.target_definition_version != TARGET_DEFINITION_VERSION:
             raise ValueError("unsupported probe target definitions; refit the artifact probes")
         validate_planner_controls(self.planner_controls, _default_planner_controls())
@@ -408,7 +411,10 @@ class PlannerArtifact:
             "target_definition_version",
         }
         if payload.get("schema_version") != ARTIFACT_SCHEMA_VERSION:
-            raise ValueError("unsupported planner artifact; refit probes to produce a v4 bundle")
+            raise ValueError(
+                "unsupported planner artifact; retrain the checkpoint and refit probes "
+                f"to produce a {ARTIFACT_SCHEMA_VERSION} bundle"
+            )
         _only(payload, allowed, "planner artifact")
         return cls(
             schema_version=str(payload.get("schema_version", "")),

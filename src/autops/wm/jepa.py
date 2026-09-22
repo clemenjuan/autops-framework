@@ -11,10 +11,12 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any
 
+from autops.wm.schema import EVENTSAT_OBSERVATIONS
+
 
 @dataclass(frozen=True)
 class LeWMConfig:
-    obs_dim: int = 25
+    obs_dim: int = len(EVENTSAT_OBSERVATIONS)
     action_dim: int = 7
     embed_dim: int = 192
     history: int = 3

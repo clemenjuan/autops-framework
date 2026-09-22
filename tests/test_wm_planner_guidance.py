@@ -19,6 +19,8 @@ from autops.wm.guidance import pipeline_scores, project_executable_candidates
 from autops.wm.schema import EVENTSAT_ACTIONS, EVENTSAT_OBSERVATIONS
 from autops.wm.scoring import analytical_candidate_attributes
 
+OBS_DIM = len(EVENTSAT_OBSERVATIONS)
+
 
 def _evidence(attributes: tuple[str, ...]) -> ProbeEvidenceContract:
     zeros = {name: 0.0 for name in attributes}
@@ -31,7 +33,7 @@ def _artifact() -> PlannerArtifact:
         model=ModelContract(
             checkpoint="weights/lewm.ckpt",
             mission="eventsat",
-            obs_dim=25,
+            obs_dim=OBS_DIM,
             action_dim=7,
             embed_dim=4,
             history=3,
@@ -41,8 +43,8 @@ def _artifact() -> PlannerArtifact:
             checkpoint_sha256="0" * 64,
         ),
         normalization=NormalizationContract(
-            obs_mean=(0.0,) * 25,
-            obs_std=(1.0,) * 25,
+            obs_mean=(0.0,) * OBS_DIM,
+            obs_std=(1.0,) * OBS_DIM,
             action_mean=(0.0,) * 7,
             action_std=(1.0,) * 7,
         ),
@@ -219,7 +221,7 @@ def test_planner_injects_pipeline_candidate_at_every_cem_iteration() -> None:
 
     planner = _planner(iterations=3, rollout_scorer=scorer)
     state = _state(
-        obs25=np.zeros(25, dtype=np.float32),
+        obs_vector=np.zeros(OBS_DIM, dtype=np.float32),
         battery_soc=0.8,
         health_status="nominal",
         physical_ground_pass_active=False,
@@ -372,7 +374,7 @@ def test_pipeline_score_rejects_a_projection_from_another_candidate_bank() -> No
 def test_projected_command_matches_environment_transition(mode: str, condition: str) -> None:
     from autops.config import expand_coordinate
     from autops.missions.eventsat.env import EventSatEnvironment
-    from autops.missions.eventsat.physics import encode_vectors
+    from autops.missions.eventsat.observation import encode_vectors
 
     config = expand_coordinate("eventsat/sas/ao/symb").mission_config
     config["anomalies"]["probability_per_step"] = 0.0
@@ -417,7 +419,7 @@ def test_identical_repaired_commands_receive_identical_analytical_scores() -> No
 def test_projection_propagates_a_multi_step_candidate_like_truth() -> None:
     from autops.config import expand_coordinate
     from autops.missions.eventsat.env import EventSatEnvironment
-    from autops.missions.eventsat.physics import encode_vectors
+    from autops.missions.eventsat.observation import encode_vectors
 
     config = expand_coordinate("eventsat/sas/ao/symb").mission_config
     config["anomalies"]["probability_per_step"] = 0.0
@@ -442,7 +444,7 @@ def test_projection_propagates_a_multi_step_candidate_like_truth() -> None:
 
 def test_executed_ground_override_updates_cem_history_and_invalidates_held_plan() -> None:
     planner = _planner(plan_hold=3)
-    state = _state(obs25=np.zeros(25), battery_soc=0.8)
+    state = _state(obs_vector=np.zeros(OBS_DIM), battery_soc=0.8)
     planner.select_action(DecisionContext(state, {}, None, 0, role="onboard"))
     different = "payload_send" if planner._last_action != 4 else "charging"
     planner.update({"info": {"requested_mode": different}})

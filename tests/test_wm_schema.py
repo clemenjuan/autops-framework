@@ -73,7 +73,7 @@ def test_trace_roundtrip_derives_action_vocabulary_from_metadata(tmp_path, missi
 
 
 def test_canonical_event_dimensions_are_stable():
-    assert len(EVENTSAT_OBSERVATIONS) == 25
+    assert len(EVENTSAT_OBSERVATIONS) == 46
     assert len(EVENTSAT_STATES) == 25
     assert len(EVENTSAT_ACTIONS) == 7
     assert len(SSA_ACTIONS) == 6

@@ -24,7 +24,8 @@ from autops.llm.onboard_prompts import (
     format_onboard_tool_result_prompt,
 )
 from autops.llm.tools import execute_tool
-from autops.missions.eventsat.physics import MODES, encode_vectors
+from autops.missions.eventsat.observation import encode_vectors
+from autops.missions.eventsat.physics import MODES
 from autops.paradigms.base import expand_schedule
 from autops.wm.cem import CEMConfig
 

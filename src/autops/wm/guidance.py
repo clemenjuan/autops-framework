@@ -2,8 +2,12 @@
 
 Every CEM candidate is projected through the authoritative atomic byte
 transitions before either learned or analytical scoring. The projector mirrors
-environment settling, progress, health, storage, and battery rules. It uses the
-onboard contact/sunlight almanac but never propagates orbital dynamics.
+environment settling, progress, health, storage, and battery rules. It never
+propagates orbital dynamics. With a privileged contact/sunlight almanac (the
+analytical oracle), future contact is known. Without one (the onboard view),
+only present station visibility is known, sunlight persists at its current
+value, and communication may be commanded before visibility for prepointing;
+the environment still gates every transfer on physical contact.
 """
 
 from __future__ import annotations
@@ -40,6 +44,24 @@ def _number(state: Mapping[str, Any], key: str, default: float = 0.0) -> float:
         return default
 
 
+def has_contact_forecast(state: Mapping[str, Any]) -> bool:
+    """Return whether the decision record carries privileged future contact timing."""
+
+    return (
+        isinstance(state.get("planning_contact_seconds"), (list, tuple, np.ndarray))
+        or isinstance(state.get("_analytic_orbit_cache"), Mapping)
+        or "time_to_next_pass" in state
+    )
+
+
+def _currently_visible(state: Mapping[str, Any]) -> bool:
+    return (
+        bool(state.get("physical_ground_pass_active", False))
+        or bool(state.get("station_visible", False))
+        or _number(state, "contact_window_seconds") > 0.0
+    )
+
+
 def contact_capacities(state: Mapping[str, Any], horizon: int) -> np.ndarray:
     """Return link capacity per requested action without rolling orbital physics."""
 
@@ -65,10 +87,7 @@ def contact_capacities(state: Mapping[str, Any], horizon: int) -> np.ndarray:
         if np.any(capacities):
             return capacities
 
-    active = bool(state.get("physical_ground_pass_active", False)) or (
-        _number(state, "contact_window_seconds") > 0.0
-    )
-    if active:
+    if _currently_visible(state):
         remaining_s = _number(
             state,
             "remaining_pass_duration_s",
@@ -123,12 +142,12 @@ def admissible_action_mask(
     compressed = _number(state, "jetson_compressed_mb")
     obc_capacity = max(0.0, _number(state, "storage_capacity_mb", 4096.0))
     jetson_capacity = max(0.0, _number(state, "jetson_capacity_mb", 249036.8))
-    physical = bool(state.get("physical_ground_pass_active", False)) or (
-        _number(state, "contact_window_seconds") > 0.0
-    )
-    estimated = bool(state.get("contact_window_active", state.get("ground_pass_active", False)))
+    physical = _currently_visible(state)
+    estimated = bool(state.get("contact_window_active", False))
     settling = max(0, int(_number(state, "settling_time_steps")))
-    if future_contact_mb is None:
+    if future_contact_mb is None and not has_contact_forecast(state):
+        precontact = True  # onboard view: prepointing permitted; truth gates transfer
+    elif future_contact_mb is None:
         time_to_pass = _number(state, "time_to_next_pass", float("inf"))
         precontact = 0.0 < time_to_pass <= settling
     else:
@@ -278,6 +297,7 @@ def project_executable_candidates(
     rate = max(1e-12, _number(state, "downlink_rate_kbps", 50.0))
     contacts_s = capacities * 8000.0 / rate
     sunlight = _planning_sunlight(state, horizon)
+    forecast = has_contact_forecast(state)
     parameters = _transition_parameters(state)
     settling = max(0, int(_number(state, "settling_time_steps")))
     projected = requested.astype(np.int64, copy=True)
@@ -296,7 +316,7 @@ def project_executable_candidates(
                 simulation,
                 reserve_soc=reserve_soc,
                 comms_soc_floor=comms_soc_floor,
-                future_contact_mb=capacities[offset:],
+                future_contact_mb=capacities[offset:] if forecast else None,
             )
             action = int(requested_value)
             if not mask[action]:
@@ -502,6 +522,7 @@ __all__ = [
     "admissible_action_mask",
     "contact_capacities",
     "guided_probabilities",
+    "has_contact_forecast",
     "pipeline_scores",
     "project_executable_candidates",
     "seed_pipeline_candidate",

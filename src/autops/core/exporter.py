@@ -12,8 +12,8 @@ from autops.config import ExperimentSpec, asset_root, runtime_root
 from autops.core.provenance import collect_provenance
 from autops.core.runner import ExperimentRunner
 from autops.core.ssa_runner import _episode_config, _organisation_config
+from autops.missions.eventsat.observation import encode_vectors
 from autops.missions.eventsat.physics import MODES as EVENTSAT_MODES
-from autops.missions.eventsat.physics import encode_vectors
 from autops.missions.ssa.env import SSAEnvironment
 from autops.missions.ssa.policy import SSA_MODES
 from autops.organisations.ssa import create_organisation

@@ -1,18 +1,26 @@
 """Single authoritative EventSat truth environment.
 
 Orekit's Eckstein-Hechler propagation is preferred; a seeded fallback preserves
-portable experiments. Operations logic sees the deterministic contact plan,
-while data transfer remains gated by physical overlap. Spacecraft-operations
+portable experiments. Telemetry carries the privileged contact/eclipse almanac
+for ground planning and the analytical oracle; onboard learned planning sees
+only ``observation.onboard_view``. Data transfer remains gated by physical
+overlap. Spacecraft-operations
 context follows Sellmaier et al. (2022), doi:10.1007/978-3-030-88593-9.
 """
 
 from __future__ import annotations
 
 import random
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any
 
 from autops.core.types import EnvironmentStep
+from autops.missions.eventsat.almanac import event_lookahead
+from autops.missions.eventsat.observation import (
+    idle_interval,
+    interval_feedback,
+    navigation_fix,
+)
 from autops.missions.eventsat.physics import (
     EventSatState,
     planner_event_energy_wh,
@@ -79,6 +87,7 @@ class EventSatEnvironment:
         self._arrival_rng = random.Random()
         self._duration_rng = random.Random()
         self._last_info: dict[str, Any] = {}
+        self._last_interval = idle_interval()
         self._seed = 0
 
     def reset(self, seed: int | None = None) -> dict[str, Any]:
@@ -107,6 +116,7 @@ class EventSatEnvironment:
             prefer_orekit=self.prefer_orekit,
         )
         self._last_info = {}
+        self._last_interval = idle_interval()
         return self.observe()
 
     @property
@@ -147,6 +157,7 @@ class EventSatEnvironment:
         )
         if contact_s > 0:
             self.state.total_contact_s += contact_s
+        before = self.state.pipeline()
         effects = self._apply_mode(effective, contact_s)
         anomaly_event = self._update_anomaly()
         self.state.current_mode = effective
@@ -163,6 +174,7 @@ class EventSatEnvironment:
             effects,
         )
         self._last_info = info
+        self._last_interval = interval_feedback(info, before, self.state.pipeline())
         return EnvironmentStep(
             observation=self.observe(),
             reward=self._reward(effective, info),
@@ -171,7 +183,13 @@ class EventSatEnvironment:
         )
 
     def observe(self) -> dict[str, Any]:
-        lookahead = self._lookahead()
+        lookahead = event_lookahead(
+            self.orbit,
+            self.state.step,
+            timestep_s=self.timestep_s,
+            period_steps=self.orbital_period_steps,
+            downlink_rate_kbps=self.downlink_rate_kbps,
+        )
         state = self.state
         storage = self.config["storage"]
         max_downlink = state.total_contact_s * self.downlink_rate_kbps / 8.0 / 1000.0
@@ -179,12 +197,14 @@ class EventSatEnvironment:
             **lookahead,
             "in_sunlight": bool(self.orbit and self.orbit.is_in_sunlight(state.step)),
             "physical_ground_pass_active": self.physical_contact_active(),
+            "station_visible": bool(self.orbit and self.orbit.is_station_visible(state.step)),
             "contact_window_active": (
                 lookahead["contact_window_seconds"] > 0
                 or 0 < lookahead["time_to_next_pass"] <= self.settling_steps
             ),
             "health_status": "nominal" if state.active_anomaly is None else state.active_anomaly,
-            "navigation": self._navigation(),
+            "navigation": navigation_fix(self.orbit.navigation if self.orbit else None, state.step),
+            "last_interval": dict(self._last_interval),
             "previous_mode": state.previous_mode,
             "jetson_raw_mb": state.jetson_raw_mb,
             "jetson_compressed_mb": state.jetson_compressed_mb,
@@ -273,7 +293,11 @@ class EventSatEnvironment:
     def _apply_mode(self, mode: str, contact_s: float) -> dict[str, Any]:
         state = self.state
         p = self._pipeline_parameters()
-        result: dict[str, Any] = {"step_downlinked_mb": 0.0, "contact_seconds": contact_s}
+        result: dict[str, Any] = {
+            "step_downlinked_mb": 0.0,
+            "step_obc_transfer_mb": 0.0,
+            "contact_seconds": contact_s,
+        }
         if mode != "payload_compress" and state.current_mode == "payload_compress":
             state.compression_progress = 0
         if mode != "payload_detect" and state.current_mode == "payload_detect":
@@ -301,6 +325,9 @@ class EventSatEnvironment:
             state.accept_pipeline(outcome.state)
             result["step_downlinked_mb"] = (
                 outcome.transferred_mb if mode == "communication" else 0.0
+            )
+            result["step_obc_transfer_mb"] = (
+                outcome.transferred_mb if mode == "payload_send" else 0.0
             )
         result["action_accepted"] = (
             bool(outcome.accepted) if outcome else mode in {"charging", "safe"}
@@ -362,67 +389,6 @@ class EventSatEnvironment:
             / 1000.0,
             **energy,
             **effects,
-        }
-
-    def _lookahead(self) -> dict[str, float]:
-        step = self.state.step
-        now = step * self.timestep_s
-        period = self.orbital_period_steps
-        eclipses = self.orbit.eclipses if self.orbit else ()
-        passes = self.orbit.ground_passes if self.orbit else ()
-        future_eclipses = [item for item in eclipses if item.start_s > now]
-        future_passes = [item for item in passes if item.start_s > now]
-        current = self.orbit.get_current_pass(step) if self.orbit else None
-        time_eclipse = (
-            int((future_eclipses[0].start_s - now) / self.timestep_s) if future_eclipses else period
-        )
-        time_pass = (
-            int((future_passes[0].start_s - now) / self.timestep_s) if future_passes else period
-        )
-        remaining_s = max(0.0, current.end_s - now) if current else 0.0
-        current_contact_s = self.orbit.contact_seconds(step) if self.orbit else 0.0
-        reference_end = current.end_s if current else now
-        # A step can straddle a pass start: contact is already active while the
-        # pass itself still begins later in the same step, which leaves the
-        # current pass inside future_passes. Measuring the gap against it then
-        # yields a negative span, so plans collapse to a single step exactly at
-        # the pass entry where ground paradigms do their planning.
-        upcoming = [item for item in future_passes if item.start_s >= reference_end]
-        next_gap = period
-        following_gap = period
-        if upcoming:
-            next_gap = max(1, int((upcoming[0].start_s - reference_end) / self.timestep_s))
-        if len(upcoming) >= 2:
-            following_gap = max(1, int((upcoming[1].start_s - upcoming[0].end_s) / self.timestep_s))
-        capacity_s = self.orbit.future_pass_contact_s(step, 1) if self.orbit else 0.0
-        return {
-            "orbital_phase": (step % period) / period,
-            "time_to_next_eclipse": float(time_eclipse),
-            "time_to_next_pass": float(time_pass),
-            "remaining_pass_duration": remaining_s / self.timestep_s,
-            "remaining_pass_duration_s": remaining_s,
-            "contact_window_seconds": current_contact_s,
-            "next_gap_steps": float(next_gap),
-            "following_gap_steps": float(following_gap),
-            "planning_gap_steps": float(next_gap),
-            "future_pass_capacity_mb": capacity_s * self.downlink_rate_kbps / 8.0 / 1000.0,
-        }
-
-    def _navigation(self) -> dict[str, Any]:
-        """Ideal GNSS fix and present geometry at the current step start."""
-
-        track = self.orbit.navigation if self.orbit else None
-        if track is None:
-            return {"valid": False}
-        row = self.state.step
-        return {
-            "valid": True,
-            "utc": (track.epoch + timedelta(seconds=row * track.step_s)).isoformat(),
-            "frame": "ITRF/IERS-2010",
-            "position_km": track.position_km[row].tolist(),
-            "velocity_km_s": track.velocity_km_s[row].tolist(),
-            "sun_unit": track.sun_unit[row].tolist(),
-            "station_elevation_deg": float(track.station_elevation_deg[row]),
         }
 
     def _remaining_downlink_mb(self) -> float:

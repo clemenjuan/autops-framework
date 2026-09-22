@@ -1,4 +1,4 @@
-"""EventSat state, encoding, and power primitives.
+"""EventSat state, safety, settling, and power primitives.
 
 The model parameters are injected from one validated mission YAML. The power
 bookkeeping follows the mission design inputs and treats planner inference as
@@ -8,12 +8,9 @@ comparisons (see also Hafner et al. 2023, arXiv:2301.04104 for world models).
 
 from __future__ import annotations
 
-import math
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
-
-import numpy as np
 
 from autops.missions.eventsat.transitions import total_storage_mb
 from autops.wm.schema import EVENTSAT_ACTIONS as MODES
@@ -122,76 +119,6 @@ class EventSatState:
     @property
     def data_stored_mb(self) -> float:
         return total_storage_mb(self.pipeline())
-
-
-def _ratio(value: Any, denominator: float) -> float:
-    try:
-        return min(1.0, max(0.0, float(value) / max(denominator, 1e-12)))
-    except (TypeError, ValueError):
-        return 0.0
-
-
-def encode_vectors(observation: dict[str, Any]) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
-    sat = observation.get("satellites", {}).get("eventsat_0", {})
-    resources = sat.get("resources", {})
-    raw = {**resources, **sat.get("metadata", {}), "current_mode": sat.get("status", "charging")}
-    step = int(observation.get("step", 0))
-    max_steps = max(1, int(observation.get("global", {}).get("max_steps", 10080)))
-    period = max(1.0, float(raw.get("orbital_period_steps", 92)))
-    obc_capacity = float(raw.get("storage_capacity_mb", 4096.0))
-    jetson_capacity = float(raw.get("jetson_capacity_mb", 249036.8))
-    phase = float(raw.get("orbital_phase", 0.0))
-    mode = str(raw.get("current_mode", "charging"))
-    obs = np.zeros(25, dtype=np.float32)
-    obs[:18] = (
-        float(raw.get("battery_soc", 0.0)),
-        _ratio(raw.get("obc_data_mb", 0.0), obc_capacity),
-        _ratio(raw.get("jetson_raw_mb", 0.0), jetson_capacity),
-        _ratio(raw.get("jetson_compressed_mb", 0.0), jetson_capacity),
-        math.sin(phase * 2 * math.pi),
-        math.cos(phase * 2 * math.pi),
-        min(float(raw.get("time_to_next_eclipse", period)) / period, 1.0),
-        min(float(raw.get("time_to_next_pass", period)) / period, 1.0),
-        min(float(raw.get("remaining_pass_duration", 0.0)) / 10.0, 1.0),
-        step / max_steps,
-        float(bool(raw.get("in_sunlight", False))),
-        float(bool(raw.get("contact_window_active", False))),
-        float(raw.get("health_status", "nominal") == "nominal"),
-        min(float(raw.get("uncompressed_observations", 0.0)) / 10.0, 1.0),
-        min(float(raw.get("compression_progress", 0.0)) / 2.0, 1.0),
-        min(float(raw.get("undetected_observations", 0.0)) / 10.0, 1.0),
-        min(float(raw.get("detection_progress", 0.0)) / 5.0, 1.0),
-        _ratio(raw.get("data_downlinked_mb", 0.0), raw.get("max_achievable_downlink_mb", 1.0)),
-    )
-    obs[18 + (MODES.index(mode) if mode in MODES else 0)] = 1.0
-    state_values = [
-        raw.get("battery_soc", 0.0),
-        MODES.index(mode) if mode in MODES else 0,
-        float(bool(raw.get("in_sunlight", False))),
-        float(bool(raw.get("contact_window_active", False))),
-        phase,
-        raw.get("time_to_next_eclipse", period),
-        raw.get("time_to_next_pass", period),
-        raw.get("remaining_pass_duration", 0.0),
-        raw.get("following_gap_steps", period),
-        raw.get("data_stored_mb", 0.0),
-        raw.get("obc_data_mb", 0.0),
-        raw.get("jetson_raw_mb", 0.0),
-        raw.get("jetson_compressed_mb", 0.0),
-        raw.get("data_downlinked_mb", 0.0),
-        raw.get("uncompressed_observations", 0.0),
-        raw.get("compression_progress", 0.0),
-        raw.get("undetected_observations", 0.0),
-        raw.get("detection_progress", 0.0),
-        raw.get("total_observation_s", 0.0),
-        raw.get("total_detections", 0.0),
-        obc_capacity,
-        jetson_capacity,
-        raw.get("remaining_achievable_downlink_mb", 0.0),
-        raw.get("achievable_downlink_mb", 0.0),
-        float(raw.get("health_status", "nominal") == "nominal"),
-    ]
-    return obs, np.asarray(state_values, dtype=np.float32), raw
 
 
 def battery_soc_after_energy(

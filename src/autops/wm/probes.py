@@ -82,7 +82,7 @@ def build_eventsat_targets(trace: TraceDataset) -> np.ndarray:
     index = {name: i for i, name in enumerate(trace.metadata.state_names)}
     required = {
         "battery_soc",
-        "ground_pass_active",
+        "contact_window_active",
         "obc_data_mb",
         "jetson_raw_mb",
         "jetson_compressed_mb",
@@ -112,7 +112,7 @@ def build_eventsat_targets(trace: TraceDataset) -> np.ndarray:
         data_downlinked_mb=state[..., index["data_downlinked_mb"]],
         total_observation_s=state[..., index["total_observation_s"]],
         total_detections=state[..., index["total_detections"]],
-        communication_opportunity=state[..., index["ground_pass_active"]] > 0.5,
+        communication_opportunity=state[..., index["contact_window_active"]] > 0.5,
         forced_mode_risk=incoming_forced,
         health_nominal=state[..., index["health_nominal"]],
     )
@@ -155,7 +155,9 @@ def fit_ridge_probe(
     X, Y, names = _validate_probe_inputs(features, targets, attribute_names)
     if ridge < 0.0:
         raise ValueError("ridge must be non-negative")
-    episode_split = episodes or split_episodes(X.shape[0], train_fraction=train_fraction, seed=seed)
+    episode_split = episodes or split_episodes(
+        range(X.shape[0]), train_fraction=train_fraction, seed=seed
+    )
     Xtr, Ytr = _rows(X, episode_split.train), _rows(Y, episode_split.train)
     Xv, Yv = _rows(X, episode_split.validation), _rows(Y, episode_split.validation)
 

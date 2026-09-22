@@ -321,7 +321,7 @@ def compare_probe_heads(
         learning_rate=learning_rate,
         weight_decay=weight_decay,
     )
-    split = episodes or split_episodes(X.shape[0], train_fraction=0.8, seed=seed)
+    split = episodes or split_episodes(range(X.shape[0]), train_fraction=0.8, seed=seed)
     predictions = _fit_probe_predictions(
         X,
         Y,

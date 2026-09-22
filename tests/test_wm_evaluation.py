@@ -21,8 +21,10 @@ from autops.wm.artifact import (
 )
 from autops.wm.cem import CEMConfig
 from autops.wm.jepa import LeWMConfig
-from autops.wm.schema import load_trace, write_trace
+from autops.wm.schema import EVENTSAT_OBSERVATIONS, load_trace, write_trace
 from autops.wm.training import TrainingConfig, save_checkpoint, train_lewm
+
+OBS_DIM = len(EVENTSAT_OBSERVATIONS)
 
 
 @pytest.fixture(scope="module")
@@ -38,7 +40,7 @@ def evaluation_bundle(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, P
     trained = train_lewm(
         trace,
         model_config=LeWMConfig(
-            obs_dim=25,
+            obs_dim=OBS_DIM,
             action_dim=7,
             embed_dim=8,
             encoder_hidden_dim=8,

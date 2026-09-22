@@ -13,7 +13,8 @@ from typing import Any
 
 from autops.core.plugin import Representation, register
 from autops.core.types import DecisionContext, SpaceSpec
-from autops.missions.eventsat.physics import MODES, encode_vectors
+from autops.missions.eventsat.observation import encode_vectors
+from autops.missions.eventsat.physics import MODES
 
 
 def _action(mode: str, *, schedule: list[dict[str, Any]] | None = None) -> dict[str, Any]:

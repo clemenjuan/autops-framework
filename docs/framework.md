@@ -31,13 +31,16 @@ predicts action-conditioned latent futures, decodes audited attributes through a
 probes, and performs categorical cross-entropy-method search. Learned world-model
 planning is motivated by Hafner et al. [5] and the LeWorldModel formulation [6].
 
-`analytical-cem` is its matched model-based reference, in the sampling-based
+`analytical-cem` is its model-based reference, in the sampling-based
 CEM-MPC tradition [7, 8, 9]. It uses the same CEM, candidate projection,
 scalarisation, guidance, plan-hold, and safety controls, but scores terminal
 attributes from shared deterministic EventSat transitions, conditional on the almanac
 and persistent current health (future anomalies and compute events are not predicted). Contact and sunlight
 lookahead come from the environment's active orbit backend, so Orekit propagation is
 computed once as the authoritative almanac rather than duplicated per candidate.
+Because it is given the exact future that `lewm-cem` must infer from its onboard
+observation, `analytical-cem` is a forecast-oracle upper bound, not an onboard peer
+(see the information boundary in [architecture](architecture.md)).
 
 `rl` and `hrl` are reserved names, with `implemented: false` in `matrix.yaml`. They
 cannot be expanded or run. A future PPO/RLlib contribution can implement the common

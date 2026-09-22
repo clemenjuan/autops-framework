@@ -64,6 +64,12 @@ class OrbitalContext:
         instant_s = step * self.step_s
         return not any(interval.start_s <= instant_s < interval.end_s for interval in self.eclipses)
 
+    def is_station_visible(self, step: int) -> bool:
+        """Return geometric station visibility at the start of an action step."""
+
+        instant_s = step * self.step_s
+        return any(item.start_s <= instant_s < item.end_s for item in self.ground_passes)
+
     def contact_seconds(self, step: int) -> float:
         """Physical contact seconds overlapping an action step."""
 

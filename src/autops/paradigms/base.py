@@ -11,7 +11,6 @@ from autops.core.types import DecisionContext
 from autops.memory.fixed import FixedMemory
 
 _ALMANAC_KEYS = (
-    "orbital_phase",
     "planning_contact_seconds",
     "planning_sunlight",
     "time_to_next_eclipse",

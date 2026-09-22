@@ -31,7 +31,7 @@ from autops.wm.schema import (
     trace_sha256,
 )
 
-CHECKPOINT_SCHEMA_VERSION = "autops.lewm.checkpoint/v2"
+CHECKPOINT_SCHEMA_VERSION = "autops.lewm.checkpoint/v3"
 ValidationCallback = Callable[[int, Mapping[str, float]], None]
 
 
@@ -87,6 +87,7 @@ class CheckpointContract:
     trace_sha256: str
     n_episodes: int
     n_steps: int
+    episode_seeds: tuple[int, ...]
     episodes: EpisodeSplit
     normalizer: FeatureNormalizer
     train_loss: float
@@ -99,7 +100,10 @@ class CheckpointContract:
 
     def __post_init__(self) -> None:
         if self.schema_version != CHECKPOINT_SCHEMA_VERSION:
-            raise ValueError(f"unsupported LeWM checkpoint schema {self.schema_version!r}")
+            raise ValueError(
+                f"unsupported LeWM checkpoint schema {self.schema_version!r}; "
+                "retrain on a current trace"
+            )
         if self.trace_schema_version != TRACE_SCHEMA_VERSION:
             raise ValueError(f"unsupported training trace schema {self.trace_schema_version!r}")
         if self.mission not in {"eventsat", "ssa"}:
@@ -134,8 +138,10 @@ class CheckpointContract:
             raise ValueError("checkpoint episode split must cover the complete training trace")
         if self.training_config.validation_sample_size < len(self.episodes.validation):
             raise ValueError("validation_sample_size must cover every validation episode")
+        if len(self.episode_seeds) != self.n_episodes:
+            raise ValueError("checkpoint episode_seeds must hold one seed per trace episode")
         expected = split_episodes(
-            self.n_episodes,
+            self.episode_seeds,
             train_fraction=self.training_config.train_fraction,
             seed=self.training_config.seed,
         )
@@ -188,6 +194,8 @@ class CheckpointContract:
             raise ValueError("trace dimensions do not match checkpoint training data")
         if trace_sha256(trace) != self.trace_sha256:
             raise ValueError("trace SHA-256 does not match checkpoint training data")
+        if tuple(int(seed) for seed in trace.episode_seed) != self.episode_seeds:
+            raise ValueError("trace episode seeds do not match checkpoint split groups")
         fitted = fit_normalizer(trace, self.episodes.train)
         for name in ("obs_mean", "obs_std", "action_mean", "action_std"):
             if not np.array_equal(getattr(fitted, name), getattr(self.normalizer, name)):
@@ -206,6 +214,7 @@ class CheckpointContract:
                 "trace_sha256": self.trace_sha256,
                 "n_episodes": self.n_episodes,
                 "n_steps": self.n_steps,
+                "episode_seeds": list(self.episode_seeds),
                 "train_episodes": list(self.episodes.train),
                 "validation_episodes": list(self.episodes.validation),
                 "normalizer": _normalizer_dict(self.normalizer),
@@ -418,6 +427,7 @@ def train_lewm(
         trace_sha256=trace_sha256(trace),
         n_episodes=trace.n_episodes,
         n_steps=trace.n_steps,
+        episode_seeds=tuple(int(seed) for seed in trace.episode_seed),
         episodes=windows.episodes,
         normalizer=windows.normalizer,
         train_loss=evidence.train_loss,
@@ -479,7 +489,10 @@ def load_checkpoint(
         raise ValueError("LeWM checkpoint root must be a mapping")
     _strict_fields(payload, {"schema_version", "contract", "state_dict"}, "LeWM checkpoint")
     if payload["schema_version"] != CHECKPOINT_SCHEMA_VERSION:
-        raise ValueError(f"unsupported LeWM checkpoint schema {payload['schema_version']!r}")
+        raise ValueError(
+            f"unsupported LeWM checkpoint schema {payload['schema_version']!r}; "
+            "retrain on a current trace"
+        )
     if not isinstance(payload["contract"], Mapping):
         raise ValueError("LeWM checkpoint contract must be a mapping")
     contract = CheckpointContract.from_dict(payload["contract"])

@@ -20,120 +20,17 @@ import numpy as np
 from autops.wm._contract_io import canonical_names as _names
 from autops.wm._contract_io import integer_array as _integer_array
 from autops.wm.trace_source import TraceSource
-
-TRACE_SCHEMA_VERSION = "autops.world_model.trace/v1"
-
-EVENTSAT_ACTIONS = (
-    "charging",
-    "communication",
-    "payload_observe",
-    "payload_compress",
-    "payload_detect",
-    "payload_send",
-    "safe",
+from autops.wm.vocabulary import (
+    EVENTSAT_ACTIONS,
+    EVENTSAT_OBSERVATIONS,
+    EVENTSAT_STATES,
+    SSA_ACTIONS,
+    SSA_COLLECTIVE_FIELDS,
+    SSA_OBSERVATIONS,
+    SSA_STATES,
 )
 
-SSA_ACTIONS = (
-    "charging",
-    "communication",
-    "payload_observe",
-    "payload_detect",
-    "isl_share",
-    "safe",
-)
-
-SSA_OBSERVATIONS = (
-    "battery_soc",
-    "storage_used_fraction",
-    "ground_pass_active",
-    "contact_fraction",
-    "in_sunlight",
-    "health_nominal",
-    "unprocessed_batches_norm",
-    "undelivered_records_norm",
-    "undelivered_record_age_norm",
-    "known_objects_fraction",
-    "ground_view_fraction",
-    "predicted_in_fov_fraction",
-    *(f"current_mode_{mode}" for mode in SSA_ACTIONS),
-)
-
-SSA_STATES = (
-    "battery_soc",
-    "current_mode_idx",
-    "ground_pass_active",
-    "contact_seconds",
-    "in_sunlight",
-    "health_nominal",
-    "jetson_raw_mb",
-    "jetson_capacity_mb",
-    "unprocessed_batches",
-    "undelivered_records",
-    "undelivered_record_age_steps",
-    "known_objects",
-    "ground_view_objects",
-    "predicted_in_fov_objects",
-    "detected_objects",
-    "target_count",
-    "episode_progress",
-    "custody_tau_steps",
-)
-
-EVENTSAT_OBSERVATIONS = (
-    "battery_soc",
-    "obc_fill",
-    "jetson_raw_fill",
-    "jetson_compressed_fill",
-    "orbital_phase_sin",
-    "orbital_phase_cos",
-    "time_to_next_eclipse_norm",
-    "time_to_next_pass_norm",
-    "remaining_pass_duration_norm",
-    "episode_progress",
-    "in_sunlight",
-    "ground_pass_active",
-    "health_nominal",
-    "uncompressed_observations_norm",
-    "compression_progress_norm",
-    "undetected_observations_norm",
-    "detection_progress_norm",
-    "downlink_utilization",
-    *(f"current_mode_{mode}" for mode in EVENTSAT_ACTIONS),
-)
-
-EVENTSAT_STATES = (
-    "battery_soc",
-    "current_mode_idx",
-    "in_sunlight",
-    "ground_pass_active",
-    "orbital_phase",
-    "time_to_next_eclipse",
-    "time_to_next_pass",
-    "remaining_pass_duration",
-    "following_gap_steps",
-    "data_stored_mb",
-    "obc_data_mb",
-    "jetson_raw_mb",
-    "jetson_compressed_mb",
-    "data_downlinked_mb",
-    "uncompressed_observations",
-    "compression_progress",
-    "undetected_observations",
-    "detection_progress",
-    "total_observation_s",
-    "total_detections",
-    "storage_capacity_mb",
-    "jetson_capacity_mb",
-    "remaining_achievable_downlink_mb",
-    "achievable_downlink_mb",
-    "health_nominal",
-)
-
-SSA_COLLECTIVE_FIELDS = (
-    "delivered_coverage",
-    "onboard_coverage",
-    "archive_records",
-)
+TRACE_SCHEMA_VERSION = "autops.world_model.trace/v2"
 
 _MISSION_ACTIONS = {"eventsat": EVENTSAT_ACTIONS, "ssa": SSA_ACTIONS}
 _MISSION_OBSERVATIONS = {"eventsat": EVENTSAT_OBSERVATIONS, "ssa": SSA_OBSERVATIONS}
@@ -156,7 +53,10 @@ class TraceMetadata:
 
     def __post_init__(self) -> None:
         if self.schema_version != TRACE_SCHEMA_VERSION:
-            raise ValueError(f"unsupported trace schema {self.schema_version!r}")
+            raise ValueError(
+                f"unsupported trace schema {self.schema_version!r}; "
+                f"re-export the trace as {TRACE_SCHEMA_VERSION}"
+            )
         if self.mission not in _MISSION_ACTIONS:
             raise ValueError(f"unsupported world-model mission {self.mission!r}")
         if (

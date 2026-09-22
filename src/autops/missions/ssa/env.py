@@ -417,7 +417,7 @@ class SSAEnvironment:
             self.targets,
             positions,
             sun_unit_eci(epoch_s),
-            fov_half_angle_deg=float(target_config["fov_half_angle_deg"]),
+            horizontal_fov_deg=float(self.config["payload"]["event_camera"]["horizontal_fov_deg"]),
             boresight_pitch_deg=float(target_config["boresight_pitch_deg"]),
             range_cap_km=float(target_config["r_cap_km"]),
             magnitude_limit=float(target_config["m_lim"]),

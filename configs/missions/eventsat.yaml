@@ -112,6 +112,8 @@ payload:
   event_camera:
     resolution: [720, 1280]
     type: Prophesee
+    # Manufacturer: horizontal FOV at max sensor format, "92.8 mm - 22.9 deg".
+    horizontal_fov_deg: 22.9
   frame_camera:
     type: context_camera
   jetson:

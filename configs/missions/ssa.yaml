@@ -1,5 +1,5 @@
 scenario_name: ssa
-scenario_version: "2.0"
+scenario_version: "2.1"
 description: Link-gated debris-custody constellation benchmark
 
 simulation:
@@ -70,6 +70,10 @@ storage:
   observation_size_mb: 2016
 
 payload:
+  event_camera:
+    # Manufacturer: horizontal FOV at max sensor format, "92.8 mm - 22.9 deg".
+    # Optical access approximates the footprint by a cone with half this angle.
+    horizontal_fov_deg: 22.9
   observation_duration_s: 60
   detection_time_s: 300
 
@@ -106,7 +110,6 @@ targets:
   sigma_dv_along_ms: 13.0
   sigma_dv_normal_ms: 26.0
   size_power_law_bounds_m: [0.01, 0.10]
-  fov_half_angle_deg: 1.9
   boresight_pitch_deg: 12.0
   r_cap_km: 150.0
   m_lim: 15.0

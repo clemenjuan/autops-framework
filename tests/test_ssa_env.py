@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 from collections import Counter
 from importlib import import_module
 from typing import Any
@@ -29,12 +30,11 @@ def _config(
         },
         "targets": {
             "fixed_positions_km": {"visible": [7_000.0, -10.0, 0.0]},
-            "fov_half_angle_deg": 2.0,
             "boresight_pitch_deg": 0.0,
             "r_cap_km": 100.0,
             "m_lim": 100.0,
         },
-        "payload": {"detection_time_s": 60.0},
+        "payload": {"detection_time_s": 60.0, "event_camera": {"horizontal_fov_deg": 4.0}},
         "modes": {"transition_overhead": {"settling_time_s": 0.0}},
         "communications": {"ground_station": {"always_visible": always_visible}},
     }
@@ -114,6 +114,26 @@ def test_support_cut_removes_targets_with_no_episode_access(
     assert env.target_ids == ["visible"]
     assert observation["global"]["ssa_support_cut_count"] == 1.0
     assert observation["satellites"]["sat_0"]["detection_row"] == [0]
+
+
+def test_manufacturer_fov_controls_episode_detection_support(sunlit_geometry: None) -> None:
+    config = _config(steps=1)
+    del config["payload"]["event_camera"]
+    # Static geometry points along -Y; this target is 7 degrees off boresight.
+    angle = math.radians(7.0)
+    config["targets"]["fixed_positions_km"] = {
+        "off_axis": [7_000.0 + 10.0 * math.sin(angle), -10.0 * math.cos(angle), 0.0]
+    }
+    manufacturer = SSAEnvironment(config)
+    manufacturer.reset(seed=2)
+    assert manufacturer.target_ids == ["off_axis"]
+    assert manufacturer.support_cut_count == 0
+
+    config["payload"]["event_camera"] = {"horizontal_fov_deg": 3.8}
+    narrow = SSAEnvironment(config)
+    narrow.reset(seed=2)
+    assert narrow.target_ids == []
+    assert narrow.support_cut_count == 1
 
 
 def test_dynamic_isl_pair_publication_recomputes_each_step() -> None:

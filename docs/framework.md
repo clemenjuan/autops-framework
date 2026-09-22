@@ -116,6 +116,17 @@ bandwidth-limited; coordination telemetry remains an idealized channel. The six 
 records delivered to ground, not omniscient simulator state. Organisation policies may
 change allocation and information routing, but never sensing, link, or target truth.
 
+Both mission configurations record the manufacturer-supplied **22.9° full horizontal
+field of view at maximum sensor format**, quoted as “92.8 mm - 22.9°”. The physical
+meaning of the 92.8 mm value is unspecified; it is not treated as a focal length.
+The manufacturer model/datasheet identifier remains to be supplied. EventSat's
+current observation-byte model does not use sensor geometry. SSA uses this field
+as the diameter of its existing circular access cone (11.45° half-angle), replacing
+the previous 1.9° half-angle in scenario version 2.1. This is an approximation:
+vertical field of view, sensor cropping, and a rectangular footprint are unspecified.
+It does not change the photometric detection model. SSA results generated with
+the two different fields of view must be evaluated as separate scenario cohorts.
+
 ## EventSat metrics
 
 The result document always reports the same 14 metric identifiers. Episode means are

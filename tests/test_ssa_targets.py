@@ -75,7 +75,7 @@ def test_optical_access_enforces_boresight_range_and_sunlight() -> None:
         "targets": [target],
         "target_positions_km": {"rso_0": (7_000.0, 10.0, 0.0)},
         "sun_hat": (1.0, 0.0, 0.0),
-        "fov_half_angle_deg": 1.0,
+        "horizontal_fov_deg": 2.0,
         "boresight_pitch_deg": 0.0,
         "range_cap_km": 20.0,
         "magnitude_limit": 100.0,
@@ -90,3 +90,35 @@ def test_optical_access_enforces_boresight_range_and_sunlight() -> None:
         **{**kwargs, "target_positions_km": {"rso_0": (7_000.0, -10.0, 0.0)}}
     )
     assert not optical_accesses(**{**kwargs, "sun_hat": (-1.0, 0.0, 0.0)})
+
+
+@pytest.mark.parametrize(
+    "angle_deg, visible", [(11.449999, True), (11.450001, False), (22.0, False)]
+)
+def test_horizontal_fov_is_a_full_angle(angle_deg: float, visible: bool) -> None:
+    angle = math.radians(angle_deg)
+    access = optical_accesses(
+        observer_position_km=(7_000.0, 0.0, 0.0),
+        observer_velocity_hat=(0.0, 1.0, 0.0),
+        targets=[Target("rso_0", 7_100.0, 0.0, 0.0, 0.0, 0.0, 0.0)],
+        target_positions_km={
+            "rso_0": (7_000.0 + 10.0 * math.sin(angle), 10.0 * math.cos(angle), 0.0)
+        },
+        sun_hat=(1.0, 0.0, 0.0),
+        horizontal_fov_deg=22.9,
+        boresight_pitch_deg=0.0,
+    )
+    assert bool(access) is visible
+
+
+@pytest.mark.parametrize("fov", [0.0, -1.0, 180.1, math.inf, math.nan])
+def test_optical_access_rejects_invalid_horizontal_fov(fov: float) -> None:
+    with pytest.raises(ValueError, match="horizontal_fov_deg"):
+        optical_accesses(
+            observer_position_km=(7_000.0, 0.0, 0.0),
+            observer_velocity_hat=(0.0, 1.0, 0.0),
+            targets=[],
+            target_positions_km={},
+            sun_hat=(1.0, 0.0, 0.0),
+            horizontal_fov_deg=fov,
+        )

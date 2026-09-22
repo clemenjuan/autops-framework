@@ -120,13 +120,22 @@ def optical_accesses(
     target_positions_km: Mapping[str, Sequence[float]],
     sun_hat: Sequence[float],
     *,
-    fov_half_angle_deg: float = 1.9,
+    horizontal_fov_deg: float,
     boresight_pitch_deg: float = 12.0,
     range_cap_km: float = 150.0,
     magnitude_limit: float = 15.0,
     magnitude_sigma: float = 0.5,
     albedo: float = 0.13,
 ) -> list[OpticalAccess]:
+    """Apply the cone approximation documented in ``docs/framework.md``.
+
+    The full horizontal sensor field determines the cone diameter. Vertical
+    field and rectangular sensor boundaries are not modelled.
+    """
+
+    if not 0.0 < horizontal_fov_deg <= 180.0:
+        raise ValueError("horizontal_fov_deg must be finite and in (0, 180]")
+    fov_half_angle_deg = horizontal_fov_deg / 2.0
     observer = tuple(float(value) for value in observer_position_km)
     radial = unit(observer)
     velocity = unit(observer_velocity_hat)

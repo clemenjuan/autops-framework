@@ -254,7 +254,6 @@ class EventSatEnvironment:
                 "max_steps": self.max_steps,
                 "orbital_backend": self.orbit.backend if self.orbit else "uninitialized",
             },
-            "tasks": self._tasks(metadata),
         }
 
     def episode_provenance(self) -> dict[str, Any]:
@@ -474,13 +473,3 @@ class EventSatEnvironment:
         if not info.get("action_accepted", True):
             value -= float(rewards["failed_action_penalty"])
         return float(rewards["reward_scale"]) * value
-
-    def _tasks(self, metadata: dict[str, Any]) -> list[dict[str, str]]:
-        tasks: list[dict[str, str]] = []
-        if self.state.battery_soc < 0.4:
-            tasks.append({"type": "manage_power", "priority": "high"})
-        if metadata["contact_window_active"] and self.state.obc_data_mb > 0:
-            tasks.append({"type": "schedule_downlink", "priority": "high"})
-        if self.state.battery_soc > 0.6:
-            tasks.append({"type": "schedule_observation", "priority": "normal"})
-        return tasks

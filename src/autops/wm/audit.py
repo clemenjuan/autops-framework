@@ -9,7 +9,7 @@ from typing import Any
 
 import numpy as np
 
-from autops.wm.dataset import EpisodeSplit, split_episodes
+from autops.wm.dataset import EpisodeSplit, episode_rows, split_episodes
 from autops.wm.jepa import require_torch
 from autops.wm.probes import fit_ridge_probe
 
@@ -100,11 +100,6 @@ def rank_auc(scores: np.ndarray, labels: np.ndarray) -> float:
         start = stop
     rank_sum = ranks[positive].sum()
     return float((rank_sum - n_positive * (n_positive + 1) / 2.0) / (n_positive * n_negative))
-
-
-def _rows(values: np.ndarray, episodes: Sequence[int]) -> np.ndarray:
-    selected = values[np.asarray(episodes, dtype=np.int64)]
-    return selected.reshape(-1, selected.shape[-1]).astype(np.float32)
 
 
 def _standardize(
@@ -232,8 +227,8 @@ def _fit_probe_predictions(
         episodes=split,
         seed=seed,
     )
-    X_train, X_validation = _rows(X, split.train), _rows(X, split.validation)
-    Y_train, Y_validation = _rows(Y, split.train), _rows(Y, split.validation)
+    X_train, X_validation = episode_rows(X, split.train), episode_rows(X, split.validation)
+    Y_train, Y_validation = episode_rows(Y, split.train), episode_rows(Y, split.validation)
     X_train_n, X_validation_n, _, _ = _standardize(X_train, X_validation)
     Y_train_n, _, target_mean, target_std = _standardize(Y_train, Y_validation)
     prediction_mlp_n = _fit_mlp(

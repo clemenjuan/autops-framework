@@ -8,7 +8,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from autops.wm.dataset import EpisodeSplit, split_episodes
+from autops.wm.dataset import EpisodeSplit, episode_rows, split_episodes
 from autops.wm.schema import TraceDataset
 
 TARGET_DEFINITION_VERSION = "autops.eventsat.probe-targets/v2"
@@ -135,11 +135,6 @@ def _validate_probe_inputs(
     return X, Y, attribute_names
 
 
-def _rows(values: np.ndarray, episodes: Sequence[int]) -> np.ndarray:
-    selected = values[np.asarray(episodes, dtype=np.int64)]
-    return selected.reshape(-1, selected.shape[-1]).astype(np.float64)
-
-
 def fit_ridge_probe(
     features: np.ndarray,
     targets: np.ndarray,
@@ -158,8 +153,9 @@ def fit_ridge_probe(
     episode_split = episodes or split_episodes(
         range(X.shape[0]), train_fraction=train_fraction, seed=seed
     )
-    Xtr, Ytr = _rows(X, episode_split.train), _rows(Y, episode_split.train)
-    Xv, Yv = _rows(X, episode_split.validation), _rows(Y, episode_split.validation)
+    train, validation = episode_split.train, episode_split.validation
+    Xtr, Ytr = (episode_rows(values, train, np.float64) for values in (X, Y))
+    Xv, Yv = (episode_rows(values, validation, np.float64) for values in (X, Y))
 
     x_mean, x_std = Xtr.mean(axis=0), Xtr.std(axis=0)
     x_std[x_std < 1e-8] = 1.0

@@ -76,9 +76,13 @@ def split_episodes(
     )
 
 
-def _episode_rows(values: np.ndarray, episodes: Sequence[int]) -> np.ndarray:
+def episode_rows(
+    values: np.ndarray, episodes: Sequence[int], dtype: type = np.float32
+) -> np.ndarray:
+    """Flatten the selected episodes of an ``[episode, step, feature]`` array to rows."""
+
     selected = values[np.asarray(episodes, dtype=np.int64)]
-    return selected.reshape(-1, selected.shape[-1]).astype(np.float32)
+    return selected.reshape(-1, selected.shape[-1]).astype(dtype)
 
 
 def _statistics(values: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -94,8 +98,8 @@ def fit_normalizer(trace: TraceDataset, episodes: Sequence[int]) -> FeatureNorma
     chosen = tuple(int(v) for v in episodes)
     if not chosen or min(chosen) < 0 or max(chosen) >= trace.n_episodes:
         raise ValueError("normalizer episodes must be valid trace episode indices")
-    obs_mean, obs_std = _statistics(_episode_rows(trace.obs, chosen))
-    action_mean, action_std = _statistics(_episode_rows(trace.action, chosen))
+    obs_mean, obs_std = _statistics(episode_rows(trace.obs, chosen))
+    action_mean, action_std = _statistics(episode_rows(trace.action, chosen))
     return FeatureNormalizer(obs_mean, obs_std, action_mean, action_std)
 
 
@@ -185,6 +189,7 @@ __all__ = [
     "WindowDataset",
     "WindowSplit",
     "build_window_split",
+    "episode_rows",
     "fit_normalizer",
     "split_episodes",
 ]

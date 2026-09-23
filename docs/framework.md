@@ -112,7 +112,17 @@ keeps its initial target: commands issued while settling, including a policy-req
 `safe`, are dropped rather than queued, and only environment-enforced safe mode aborts
 it. Productive operation begins when the target mode is commanded after settling. The
 optional orbital backend uses Orekit Eckstein-Hechler J2 propagation; the seeded
-fallback preserves eclipse/contact structure when Java is unavailable.
+fallback preserves eclipse/contact structure when Java is unavailable. A command
+ignored while settling is neither forced nor a constraint violation (M-13).
+
+The EventSat reward is the delivery-aligned Individual Negative reward of Juan Oliver
+et al. (EUCASS 2025): `reward_scale × (R_resource + R_action + R_mission)`. Low battery
+and a nearly full OBC are penalised; a failed action (a command clamped to charging, a
+job without a product, an observation that does not fit, or a radio attempt that
+delivers nothing) pays `failed_action_penalty`; successful pipeline stages are neutral;
+and the mission term penalises the undelivered fraction of the scaled downlink target.
+Only reinforcement learning consumes the reward, so it never changes M-01…M-14; results
+record its episode total.
 
 SSA currently uses Keplerian two-body geometry and models detect-gated object records,
 local knowledge, physical ISL record transport, and ground-delivered custody. Its mission

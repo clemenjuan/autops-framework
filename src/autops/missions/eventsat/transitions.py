@@ -146,6 +146,22 @@ def apply_downlink(
     return Transition(projected, True, transferred_mb=amount, raw_equivalent_mb=raw_equivalent)
 
 
+def failure_reason(
+    mode: str, outcome: Transition | None, had_product: bool, contact_s: float
+) -> str | None:
+    """Why an executed mode made no pipeline progress, or None when it did or could not."""
+
+    if outcome is not None:
+        return None if outcome.accepted else outcome.reason
+    if mode == "payload_compress" and not had_product:
+        return "no_raw_product"
+    if mode == "payload_detect" and not had_product:
+        return "no_undetected_product"
+    if mode == "communication" and contact_s <= 0.0:
+        return "no_contact"
+    return None
+
+
 def total_storage_mb(state: Mapping[str, Any]) -> float:
     return sum(
         max(0.0, record_number(state, key))

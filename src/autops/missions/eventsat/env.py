@@ -11,16 +11,17 @@ context follows Sellmaier et al. (2022), doi:10.1007/978-3-030-88593-9.
 from __future__ import annotations
 
 import random
-from datetime import datetime
 from typing import Any
 
 from autops.core.types import EnvironmentStep
 from autops.missions.eventsat.almanac import event_lookahead
+from autops.missions.eventsat.metrics import mission_targets
 from autops.missions.eventsat.observation import (
     idle_interval,
     interval_feedback,
     navigation_fix,
 )
+from autops.missions.eventsat.orbit import fallback_model, ground_station, orbit_elements
 from autops.missions.eventsat.physics import (
     EventSatState,
     planner_event_energy_wh,
@@ -29,6 +30,7 @@ from autops.missions.eventsat.physics import (
     safety_required,
     settle_mode,
 )
+from autops.missions.eventsat.rewards import EventSatRewardFunction, step_action_info
 from autops.missions.eventsat.transitions import (
     PipelineParameters,
     apply_can_transfer,
@@ -36,14 +38,9 @@ from autops.missions.eventsat.transitions import (
     apply_detect,
     apply_downlink,
     apply_observe,
+    failure_reason,
 )
-from autops.orbital import (
-    GroundStation,
-    OrbitElements,
-    SimplifiedModel,
-    apply_launch_lottery,
-    build_orbital_context,
-)
+from autops.orbital import apply_launch_lottery, build_orbital_context
 
 
 class EventSatEnvironment:
@@ -80,6 +77,10 @@ class EventSatEnvironment:
             1, int(float(config["payload"]["detection_time_s"]) / self.timestep_s)
         )
         self.compression_steps = max(1, int(float(config["payload"]["compression_time_factor"])))
+        self.reward_function = EventSatRewardFunction(config["rewards"])
+        self.mission_targets = mission_targets(
+            config["objectives"], self.max_steps * self.timestep_s
+        )
         self.state = EventSatState()
         self.orbit = None
         self._arrival_rng = random.Random()
@@ -95,7 +96,7 @@ class EventSatEnvironment:
         anomaly_seed = self._seed * 131 + 7919
         self._arrival_rng.seed(anomaly_seed)
         self._duration_rng.seed(anomaly_seed + 104729)
-        elements = self._orbit_elements()
+        elements = orbit_elements(self.config)
         if self.config["orbit"].get("launch_lottery", False):
             elements = apply_launch_lottery(elements, self._seed)
         self.state.orbit_elements = {
@@ -105,8 +106,8 @@ class EventSatEnvironment:
         }
         self.orbit = build_orbital_context(
             elements,
-            self._fallback_model(),
-            self._ground_station(),
+            fallback_model(self.config),
+            ground_station(self.config),
             downlink_rate_kbps=self.downlink_rate_kbps,
             step_s=self.timestep_s,
             total_steps=self.max_steps,
@@ -137,7 +138,7 @@ class EventSatEnvironment:
             battery_soc=self.state.battery_soc,
             constraints=self.config["modes"].get("constraints", {}),
         )
-        effective, in_transition = self._settle(resolved, mandatory_safe)
+        effective, in_transition, ignored = self._settle(resolved, mandatory_safe)
         safety_safe = effective == "safe"
         sunlight = bool(self.orbit and self.orbit.is_in_sunlight(self.state.step))
         contact_s = float(self.orbit.contact_seconds(self.state.step)) if self.orbit else 0.0
@@ -162,16 +163,25 @@ class EventSatEnvironment:
             effective,
             safety_safe,
             in_transition,
+            ignored,
             contact_s,
             anomaly_event,
             energy,
             effects,
         )
+        action_info = step_action_info(effective, info)
+        failed = self.reward_function.is_failed_action(effective, action_info)
+        info["failed_action"] = failed
+        info["failed_action_penalty"] = (
+            -self.reward_function.reward_scale * self.reward_function.failed_action_penalty
+            if failed
+            else 0.0
+        )
         self._last_info = info
         self._last_interval = interval_feedback(info, before, self.state.pipeline())
         return EnvironmentStep(
             observation=self.observe(),
-            reward=self._reward(effective, info),
+            reward=self._reward(effective, action_info),
             done=self.state.step >= self.max_steps,
             info=info,
         )
@@ -266,8 +276,11 @@ class EventSatEnvironment:
         raw = raw if isinstance(raw, dict) else {}
         return str(raw.get("mode", "charging")), bool(raw.get("jetson_planned", False))
 
-    def _settle(self, resolved: str, mandatory_safe: bool) -> tuple[str, bool]:
+    def _settle(self, resolved: str, mandatory_safe: bool) -> tuple[str, bool, bool]:
+        """Return the effective mode, whether it settles, and whether the command is ignored."""
+
         state = self.state
+        ignored = state.transition_steps_remaining > 0 and not mandatory_safe
         effective, state.previous_mode, state.transition_steps_remaining, transitioning = (
             settle_mode(
                 resolved,
@@ -278,7 +291,7 @@ class EventSatEnvironment:
                 mandatory_safe=mandatory_safe,
             )
         )
-        return effective, transitioning
+        return effective, transitioning, ignored
 
     def _apply_mode(self, mode: str, contact_s: float) -> dict[str, Any]:
         state = self.state
@@ -296,6 +309,11 @@ class EventSatEnvironment:
         # A step of a multi-step job with a product to work on is accepted work;
         # only the completing step can fail on the product's transition.
         working = False
+        had_product = {
+            "payload_compress": state.uncompressed_observations > 0,
+            "payload_detect": state.undetected_observations > 0,
+            "payload_send": state.jetson_compressed_mb > 0.0,
+        }.get(mode, False)
         if mode == "payload_observe":
             outcome = apply_observe(state.pipeline(), p)
         elif mode == "payload_compress" and state.uncompressed_observations:
@@ -327,6 +345,8 @@ class EventSatEnvironment:
         result["action_accepted"] = (
             bool(outcome.accepted) if outcome else working or mode in {"charging", "safe"}
         )
+        result["had_product"] = had_product
+        result["failure_reason"] = failure_reason(mode, outcome, had_product, contact_s)
         return result
 
     def _update_anomaly(self) -> str | None:
@@ -354,17 +374,22 @@ class EventSatEnvironment:
         effective: str,
         safety_safe: bool,
         in_transition: bool,
+        ignored: bool,
         contact_s: float,
         anomaly_event: str | None,
         energy: dict[str, float],
         effects: dict[str, Any],
     ) -> dict[str, Any]:
         state = self.state
+        # An ignored command has no effect, so it is neither forced nor a violation.
+        forced = resolved != requested and not ignored
         return {
             "requested_mode": requested,
             "resolved_mode": effective,
             "safety_resolved_mode": resolved,
-            "forced": resolved != requested,
+            "forced": forced,
+            "constraint_violation": forced and resolved != "safe",
+            "command_ignored": ignored,
             "safety_safe": float(safety_safe),
             "in_transition": in_transition,
             "contact_seconds": contact_s,
@@ -426,46 +451,21 @@ class EventSatEnvironment:
             step_duration_s=self.timestep_s,
         )
 
-    def _orbit_elements(self) -> OrbitElements:
-        orbit = self.config["orbit"]
-        epoch = datetime.fromisoformat(self.config["simulation"]["epoch"].replace("Z", "+00:00"))
-        return OrbitElements(
-            altitude_km=float(orbit["altitude_km"]),
-            eccentricity=float(orbit["eccentricity"]),
-            inclination_deg=float(orbit["inclination_deg"]),
-            raan_deg=float(orbit["raan_deg"]),
-            arg_perigee_deg=float(orbit["arg_perigee_deg"]),
-            true_anomaly_deg=float(orbit["true_anomaly_deg"]),
-            epoch=epoch,
-            propagator=str(orbit["propagator"]),
+    def _reward(self, mode: str, action_info: dict[str, Any]) -> float:
+        state = self.state
+        observation_target, downlink_target = self.mission_targets
+        return self.reward_function.compute(
+            mode=mode,
+            battery_soc=state.battery_soc,
+            # OBC occupancy is the downlink bottleneck and has its own capacity.
+            data_stored_mb=state.obc_data_mb,
+            storage_capacity_mb=float(self.config["storage"]["obc_capacity_mb"]),
+            action_info=action_info,
+            obs_hours=state.total_observation_s / 3600.0,
+            downlinked_mb=state.data_downlinked_mb,
+            obs_target_hours=observation_target,
+            downlink_target_mb=downlink_target,
+            episode_step=state.step - 1,
+            max_steps=self.max_steps,
+            is_final_step=state.step >= self.max_steps,
         )
-
-    def _fallback_model(self) -> SimplifiedModel:
-        orbit = self.config["orbit"]
-        passes = self.config["communications"]["passes"]
-        return SimplifiedModel(
-            orbital_period_s=float(orbit["orbital_period_s"]),
-            eclipse_fraction=float(orbit["eclipse_fraction"]),
-            passes_min_per_day=int(passes["min_per_day"]),
-            passes_max_per_day=int(passes["max_per_day"]),
-            pass_min_duration_s=float(passes["min_duration_s"]),
-            pass_max_duration_s=float(passes["max_duration_s"]),
-        )
-
-    def _ground_station(self) -> GroundStation:
-        station = self.config["communications"]["ground_station"]
-        return GroundStation(
-            latitude_deg=float(station["latitude_deg"]),
-            longitude_deg=float(station["longitude_deg"]),
-            altitude_m=float(station.get("altitude_m", 0.0)),
-            min_elevation_deg=float(station["min_elevation_deg"]),
-        )
-
-    def _reward(self, mode: str, info: dict[str, Any]) -> float:
-        rewards = self.config["rewards"]
-        value = float(rewards["comm_reward_factor"]) * float(info.get("step_downlinked_mb", 0.0))
-        if mode == "safe":
-            value -= float(rewards["safe_penalty"])
-        if not info.get("action_accepted", True):
-            value -= float(rewards["failed_action_penalty"])
-        return float(rewards["reward_scale"]) * value

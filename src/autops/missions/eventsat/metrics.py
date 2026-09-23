@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from statistics import mean, stdev
 from typing import Any
@@ -22,6 +23,17 @@ METRIC_IDS = {
     "M-13": "constraint_violation_rate",
     "M-14": "commanding_effort",
 }
+
+
+def mission_targets(objectives: Mapping[str, Any], duration_s: float) -> tuple[float, float]:
+    """Observation-hour and delivered-MB targets scaled from the mission to a duration."""
+
+    days = float(objectives.get("mission_duration_days", 90))
+    scale = duration_s / 86400.0 / max(days, 1e-12)
+    return (
+        float(objectives.get("total_observation_hours", 2)) * scale,
+        float(objectives.get("min_downlinked_data_mb", 221)) * scale,
+    )
 
 
 @dataclass
@@ -58,11 +70,10 @@ class EventSatMetrics:
         count = len(self.rows) * self.constellation_size
         metrics_cfg = self.config.get("metrics", {})
         weights = metrics_cfg.get("utility_weights", {})
-        objectives = self.config.get("objectives", {})
         episode_days = len(self.rows) * self.timestep_s / 86400.0
-        target_scale = episode_days / max(float(objectives.get("mission_duration_days", 90)), 1e-12)
-        obs_target = float(objectives.get("total_observation_hours", 2)) * target_scale
-        dl_target = float(objectives.get("min_downlinked_data_mb", 221)) * target_scale
+        obs_target, dl_target = mission_targets(
+            self.config.get("objectives", {}), len(self.rows) * self.timestep_s
+        )
         anomaly_events = sum(float(bool(row.get("anomaly_event"))) for row in self.rows)
         obs_ratio = float(last.get("observation_hours", 0.0)) / max(obs_target, 1e-12)
         dl_ratio = float(last.get("data_downlinked_mb", 0.0)) / max(dl_target, 1e-12)

@@ -123,6 +123,17 @@ def _ratio(value: float, denominator: float) -> float:
     return min(1.0, max(0.0, value / max(denominator, 1e-12)))
 
 
+def _log_fill(value_mb: float, product_mb: float, capacity_mb: float) -> float:
+    """Stored products on a log scale that reaches one only at physical capacity.
+
+    A linear capacity ratio maps one science product to ~1e-5 of Jetson storage;
+    counting products logarithmically keeps first-product resolution.
+    """
+
+    products = max(0.0, value_mb) / product_mb
+    return min(1.0, math.log1p(products) / math.log1p(max(1.0, capacity_mb / product_mb)))
+
+
 def _vector(navigation: Mapping[str, Any], key: str, scale: float) -> tuple[float, ...]:
     if not navigation.get("valid", False):
         return (0.0, 0.0, 0.0)
@@ -140,7 +151,10 @@ def _observation_values(raw: Mapping[str, Any]) -> dict[str, float]:
     obc_capacity = record_number(raw, "storage_capacity_mb", 4096.0)
     jetson_capacity = record_number(raw, "jetson_capacity_mb", 249036.8)
     product_mb = max(1e-12, record_number(raw, "observation_size_mb", 9.41))
+    compressed_mb = product_mb / max(1e-12, record_number(raw, "compression_ratio", 5.11))
     log_capacity = math.log1p(max(1.0, jetson_capacity / product_mb))
+    raw_mb = record_number(raw, "jetson_raw_mb")
+    jetson_compressed_mb = record_number(raw, "jetson_compressed_mb")
     solar = (raw.get("planning_power") or {}).get("solar_panels", {})
     energy_scale = max(
         1e-12,
@@ -180,10 +194,10 @@ def _observation_values(raw: Mapping[str, Any]) -> dict[str, float]:
         "station_visible": float(bool(raw.get("station_visible", False))),
         "in_sunlight": float(bool(raw.get("in_sunlight", False))),
         "battery_soc": record_number(raw, "battery_soc"),
-        "obc_fill": _ratio(record_number(raw, "obc_data_mb"), obc_capacity),
-        "jetson_raw_fill": _ratio(record_number(raw, "jetson_raw_mb"), jetson_capacity),
-        "jetson_compressed_fill": _ratio(
-            record_number(raw, "jetson_compressed_mb"), jetson_capacity
+        "obc_fill_log": _log_fill(record_number(raw, "obc_data_mb"), compressed_mb, obc_capacity),
+        "jetson_fill_log": _log_fill(raw_mb + jetson_compressed_mb, product_mb, jetson_capacity),
+        "jetson_compressed_fill_log": _log_fill(
+            jetson_compressed_mb, compressed_mb, jetson_capacity
         ),
         "health_nominal": float(raw.get("health_status", "nominal") == "nominal"),
         "uncompressed_observations_log": math.log1p(

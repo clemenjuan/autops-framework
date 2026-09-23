@@ -133,6 +133,27 @@ def test_planning_charge_reaches_the_battery_but_not_the_encoded_platform_energy
     )
 
 
+def test_storage_fills_resolve_one_product_and_reach_one_only_at_capacity() -> None:
+    observation = _environment().reset(7)
+    metadata = _metadata(observation)
+    compressed_mb = metadata["observation_size_mb"] / metadata["compression_ratio"]
+    metadata.update(
+        jetson_raw_mb=metadata["observation_size_mb"],
+        jetson_compressed_mb=0.0,
+        uncompressed_observations=1,
+    )
+    one_raw = _vector_value(observation, "jetson_fill_log")
+    assert one_raw > 0.05
+    assert one_raw == pytest.approx(_vector_value(observation, "uncompressed_observations_log"))
+    metadata.update(jetson_compressed_mb=compressed_mb)
+    assert _vector_value(observation, "jetson_fill_log") > one_raw
+    assert _vector_value(observation, "jetson_compressed_fill_log") > 0.05
+    metadata.update(obc_data_mb=compressed_mb)
+    assert _vector_value(observation, "obc_fill_log") > 0.05
+    metadata.update(jetson_raw_mb=metadata["jetson_capacity_mb"], jetson_compressed_mb=0.0)
+    assert _vector_value(observation, "jetson_fill_log") == pytest.approx(1.0)
+
+
 def test_countdowns_without_a_later_event_are_censored_labels() -> None:
     observation = _environment().reset(7)
     _metadata(observation).update(next_pass_known=False)

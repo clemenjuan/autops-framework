@@ -31,7 +31,7 @@ from autops.wm.schema import (
     trace_sha256,
 )
 
-CHECKPOINT_SCHEMA_VERSION = "autops.lewm.checkpoint/v4"
+CHECKPOINT_SCHEMA_VERSION = "autops.lewm.checkpoint/v5"
 ValidationCallback = Callable[[int, Mapping[str, float]], None]
 
 

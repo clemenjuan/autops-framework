@@ -30,7 +30,7 @@ from autops.wm.vocabulary import (
     SSA_STATES,
 )
 
-TRACE_SCHEMA_VERSION = "autops.world_model.trace/v3"
+TRACE_SCHEMA_VERSION = "autops.world_model.trace/v4"
 
 _MISSION_ACTIONS = {"eventsat": EVENTSAT_ACTIONS, "ssa": SSA_ACTIONS}
 _MISSION_OBSERVATIONS = {"eventsat": EVENTSAT_OBSERVATIONS, "ssa": SSA_OBSERVATIONS}

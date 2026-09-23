@@ -94,7 +94,7 @@ A decision record at step `t` contains only information the spacecraft could hol
 |---|---|---|
 | Navigation | Earth-fixed (ITRF, IERS 2010) position and coordinate velocity | km / 7000; km s⁻¹ / 8 |
 | Present geometry | Sun unit vector in the same frame; station elevation; station visible; in sunlight | unit vector; sin(elevation); flags |
-| Resources and health | battery state of charge; OBC, raw, and compressed pool fills; health nominal | fractions; flag |
+| Resources and health | battery state of charge; OBC, total Jetson, and compressed Jetson fills; health nominal | fraction; log(1+stored products) / log(1+capacity in products); flag |
 | Payload processing | unprocessed and undetected product counts; compression and detection progress | log(1+n) / log(1+pool capacity in products); fraction of job duration |
 | Attitude and command feedback | settling remaining; last command forced to safe or to charging; last action accepted; executed mode; attitude target | fraction of settling time; flags; two one-hot blocks |
 | Last-interval outcome | product captured; compression and detection completed; bytes moved to the OBC; bytes downlinked; net platform energy | fraction of one product or of one step's link capacity; energy / one step of peak solar generation |
@@ -125,6 +125,12 @@ collectors never plan, so a planner-energy input would be constant in training a
 at deployment; the battery state of charge still carries the drain, and neither CEM
 scorer forecasts its own future compute cost.
 
+Storage fills count stored products on a log scale, so the first product is resolved
+instead of appearing as ~10⁻⁵ of Jetson capacity. The OBC and compressed-Jetson fills
+count compressed products; the total Jetson fill counts raw products over raw plus
+compressed bytes, the quantity that observation admission checks against capacity. A
+raw-only fill would duplicate the unprocessed product count and is not an input.
+
 Values without a simulated sensor or subsystem model, such as voltages, temperatures,
 attitude quaternions, pointing error, link lock, or fault diagnoses, are not invented.
 
@@ -148,14 +154,14 @@ the settling-lead `contact_window_active` used by the communication-opportunity 
 
 The trace row stores the pre-transition observation/state and requested one-hot action;
 reward, resolved action, and forced flag describe that row's transition. The next row is
-the resulting observation. EventSat trace v3 uses the 45 observations above, 25 state
+the resulting observation. EventSat trace v4 uses the 45 observations above, 25 state
 labels, and 7 actions. SSA adds a satellite axis and uses its canonical 6-action order.
 NPZ files are pickle-free and carry names, axes, episode IDs, seeds, and a versioned
 schema. Older traces, checkpoints, and planner artifacts are rejected: a new observation
 contract requires re-export, retraining, and probe refitting, never padding or relabeling.
 
 Training and validation split launch seeds, not episode indices: every policy's
-realization of one physical episode stays on one side, and checkpoint v4 records the
+realization of one physical episode stays on one side, and checkpoint v5 records the
 per-episode seeds that define its split. With unique seeds this equals an episode shuffle.
 Dataset windows never cross episode boundaries. LeWM uses a 192-dimensional embedding
 and history 3 with a JEPA-style action-conditioned objective. Probes are affine

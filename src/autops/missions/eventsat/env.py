@@ -14,6 +14,7 @@ import random
 from typing import Any
 
 from autops.core.types import EnvironmentStep
+from autops.missions.attitude import settle_mode
 from autops.missions.eventsat.almanac import event_lookahead
 from autops.missions.eventsat.metrics import mission_targets
 from autops.missions.eventsat.observation import (
@@ -28,7 +29,6 @@ from autops.missions.eventsat.physics import (
     power_step,
     resolve_mode,
     safety_required,
-    settle_mode,
 )
 from autops.missions.eventsat.rewards import EventSatRewardFunction, step_action_info
 from autops.missions.eventsat.transitions import (

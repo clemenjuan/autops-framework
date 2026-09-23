@@ -291,9 +291,13 @@ def test_shared_plane_cache_is_trace_equivalent_to_dynamic_path() -> None:
     assert json.dumps(cached_observation).encode() == json.dumps(dynamic_observation).encode()
 
     actions = [
-        {"sat_0": {"mode": "isl_share"}, "sat_1": {"mode": "charging"}},
-        {"sat_1": {"mode": "isl_share"}, "sat_2": {"mode": "safe"}},
-        {"sat_0": {"mode": "safe"}, "sat_2": {"mode": "isl_share"}},
+        {
+            "sat_0": {"mode": "isl_share"},
+            "sat_1": {"mode": "charging"},
+            "sat_2": {"mode": "charging"},
+        },
+        {"sat_0": {"mode": "charging"}, "sat_1": {"mode": "isl_share"}, "sat_2": {"mode": "safe"}},
+        {"sat_0": {"mode": "safe"}, "sat_1": {"mode": "charging"}, "sat_2": {"mode": "isl_share"}},
     ]
     for action in actions:
         cached_result = cached.step(action)
@@ -329,6 +333,50 @@ def test_communication_can_prepoint_but_cannot_deliver_without_contact(
     assert result.info["per_satellite"]["sat_0"]["contact_seconds"] == 0.0
     assert "visible" in runtime.undelivered
     assert not env.ground_archive["visible"]
+    assert result.info["per_satellite"]["sat_0"]["failure_reason"] == "no_contact"
+
+
+def test_empty_downlink_during_contact_is_a_failed_attempt() -> None:
+    env = SSAEnvironment(_config(always_visible=True))
+    env.reset(seed=8)
+    result = env.step({"sat_0": {"mode": "communication"}})
+    assert result.info["per_satellite"]["sat_0"]["failure_reason"] == "no_source_data"
+
+
+def _settling_env(steps: int = 8) -> SSAEnvironment:
+    config = _config(steps=steps)
+    config["modes"]["transition_overhead"]["settling_time_s"] = 135.0
+    env = SSAEnvironment(config)
+    env.reset(seed=8)
+    return env
+
+
+def test_ssa_slew_keeps_its_initial_target_and_drops_commands() -> None:
+    env = _settling_env()
+    first = env.step({"sat_0": {"mode": "payload_observe"}}).info["per_satellite"]["sat_0"]
+    second = env.step({"sat_0": {"mode": "communication"}}).info["per_satellite"]["sat_0"]
+    assert first["in_transition"] and not first["command_ignored"]
+    assert second["in_transition"] and second["command_ignored"]
+    assert env.satellites["sat_0"].previous_mode == "payload_observe"
+    third = env.step({"sat_0": {"mode": "communication"}}).info["per_satellite"]["sat_0"]
+    assert third["in_transition"] and not third["command_ignored"]
+
+
+def test_ssa_critical_battery_preempts_settling() -> None:
+    env = _settling_env()
+    env.step({"sat_0": {"mode": "payload_observe"}})
+    env.satellites["sat_0"].battery_soc = 0.1
+    result = env.step({"sat_0": {"mode": "payload_observe"}})
+    assert result.info["resolved_modes"]["sat_0"] == "safe"
+    assert env.satellites["sat_0"].transition_steps_remaining == 0
+
+
+@pytest.mark.parametrize("actions", [{}, {"sat_0": {"mode": "charging"}, "sat_9": {}}, []])
+def test_misrouted_or_missing_ssa_commands_are_rejected(actions: Any) -> None:
+    env = SSAEnvironment(_config())
+    env.reset(seed=8)
+    with pytest.raises(ValueError, match="SSA"):
+        env.step(actions)
 
 
 def test_custody_uses_record_age_not_delivery_age(sunlit_geometry: None) -> None:

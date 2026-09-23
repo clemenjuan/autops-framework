@@ -228,11 +228,11 @@ def apply_ground_downlinks(
     contacts: list[str] = []
     for satellite_id, mode in modes.items():
         info = per_satellite[satellite_id]
-        if (
-            mode != "communication"
-            or info["in_transition"]
-            or float(info["contact_seconds"]) <= 0.0
-        ):
+        if mode != "communication" or info["in_transition"]:
+            continue
+        if float(info["contact_seconds"]) <= 0.0:
+            # A radio attempt without contact pays power and delivers nothing.
+            info["failure_reason"] = "no_contact"
             continue
         runtime = env.satellites[satellite_id]
         budget = (
@@ -258,6 +258,8 @@ def apply_ground_downlinks(
                 )
             env.ground_archive[object_id].append(deepcopy(record))
         info["downlinked_records"] = delivered
+        if not delivered:
+            info["failure_reason"] = "no_source_data"
         contacts.append(satellite_id)
 
     freshest = env._freshest_ground_steps()

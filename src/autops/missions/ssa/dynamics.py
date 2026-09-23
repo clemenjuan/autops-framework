@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from autops.missions.attitude import settle_mode
 from autops.missions.ssa.geometry import satellite_sunlit
 from autops.missions.ssa.policy import SSA_MODES
 from autops.missions.ssa.transport import contact_seconds
@@ -13,9 +14,17 @@ if TYPE_CHECKING:
 
 
 def decode_actions(env: SSAEnvironment, actions: dict[str, Any]) -> dict[str, str]:
+    """Decode one command per satellite; misrouted or missing commands are rejected."""
+
+    if not isinstance(actions, dict):
+        raise ValueError("SSA actions must map satellite ids to commands")
+    unknown = sorted(set(actions) - set(env.satellite_ids))
+    missing = sorted(set(env.satellite_ids) - set(actions))
+    if unknown or missing:
+        raise ValueError(f"SSA commands: unknown satellites {unknown}, missing {missing}")
     decoded: dict[str, str] = {}
     for satellite_id in env.satellite_ids:
-        payload = actions.get(satellite_id, {}) if isinstance(actions, dict) else {}
+        payload = actions[satellite_id]
         mode: Any = payload.get("mode") if isinstance(payload, dict) else payload
         if isinstance(mode, (list, tuple)):
             mode = _decode_one_hot(mode)
@@ -37,27 +46,25 @@ def resolve_actions(
     attitude_modes = set(env.config["modes"]["transition_overhead"]["attitude_maneuver_modes"])
     for satellite_id, requested_mode in requested.items():
         runtime = env.satellites[satellite_id]
+        mandatory_safe = runtime.health != "nominal" or runtime.battery_soc <= float(
+            env.config["power"]["battery"]["min_soc"]
+        )
         logical_mode = _resolve_physical_gate(env, runtime, requested_mode)
-        in_transition = False
-        if settling_steps and runtime.transition_steps_remaining > 0:
-            runtime.transition_steps_remaining -= 1
-            effective_mode = "charging"
-            in_transition = True
-            if runtime.transition_steps_remaining == 0:
-                runtime.previous_mode = logical_mode
-        elif settling_steps and _requires_maneuver(
+        # A slew keeps its initial target; commands while settling are dropped.
+        ignored = runtime.transition_steps_remaining > 0 and not mandatory_safe
+        (
+            effective_mode,
             runtime.previous_mode,
+            runtime.transition_steps_remaining,
+            in_transition,
+        ) = settle_mode(
             logical_mode,
+            runtime.previous_mode,
+            runtime.transition_steps_remaining,
+            settling_steps,
             attitude_modes,
-        ):
-            runtime.transition_steps_remaining = max(0, settling_steps - 1)
-            effective_mode = "charging"
-            in_transition = True
-            if runtime.transition_steps_remaining == 0:
-                runtime.previous_mode = logical_mode
-        else:
-            effective_mode = logical_mode
-            runtime.previous_mode = effective_mode
+            mandatory_safe=mandatory_safe,
+        )
         runtime.mode = effective_mode
         contact = contact_seconds(env, satellite_id, epoch_s)
         resolved[satellite_id] = effective_mode
@@ -66,6 +73,7 @@ def resolve_actions(
             "resolved_mode": effective_mode,
             "logical_mode": logical_mode,
             "in_transition": in_transition,
+            "command_ignored": ignored,
             "contact_seconds": contact,
             "physical_ground_pass_active": contact > 0.0,
             "downlinked_records": 0,
@@ -158,10 +166,6 @@ def _resolve_physical_gate(env: SSAEnvironment, runtime: Any, requested: str) ->
     # Communication is a pointing mode and may begin before AOS; transfer is
     # independently gated by contact duration in the transport layer.
     return requested
-
-
-def _requires_maneuver(previous: str, requested: str, attitude_modes: set[str]) -> bool:
-    return previous != requested and (previous in attitude_modes or requested in attitude_modes)
 
 
 def _decode_one_hot(values: list[Any] | tuple[Any, ...]) -> str:

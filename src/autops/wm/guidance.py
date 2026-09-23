@@ -18,11 +18,11 @@ from typing import Any
 
 import numpy as np
 
+from autops.missions.attitude import settle_mode
 from autops.missions.eventsat.physics import (
     advance_projected_battery,
     resolve_mode,
     safety_required,
-    settle_mode,
 )
 from autops.missions.eventsat.transitions import (
     PipelineParameters,

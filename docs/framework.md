@@ -135,6 +135,9 @@ records delivered to ground, not omniscient simulator state. Organisation polici
 change allocation and information routing, but never sensing, link, or target truth.
 DMAS peers are strictly local by default, and hosted CMAS and HMAS agents reach other
 satellites only over physical ISL links (see [architecture](architecture.md)).
+SSA shares EventSat's attitude rule: a slew keeps its initial target, commands while
+settling are ignored, and only environment-enforced safe mode preempts it. A
+communication attempt without contact, or with nothing to deliver, is a failed action.
 
 Both mission configurations record the manufacturer-supplied **22.9° full horizontal
 field of view at maximum sensor format**, quoted as “92.8 mm - 22.9°”. The physical

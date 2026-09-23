@@ -7,6 +7,7 @@ counters unchanged. Flow transfers may be partial.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -144,6 +145,38 @@ def apply_downlink(
         record_number(state, "downlink_raw_equivalent_mb") + raw_equivalent
     )
     return Transition(projected, True, transferred_mb=amount, raw_equivalent_mb=raw_equivalent)
+
+
+def preloaded_pipeline(
+    initial: Mapping[str, Any], storage: Mapping[str, Any]
+) -> dict[str, float | int]:
+    """Validated diagnostic science data present at reset; canonical episodes start empty.
+
+    Preloaded data was not captured in the episode, so capture totals stay zero.
+    """
+
+    raw = initial["raw_observations"]
+    obc_mb = float(initial["obc_data_mb"])
+    compressed_mb = float(initial["jetson_compressed_mb"])
+    product_mb = float(storage["observation_size_mb"])
+    ratio = float(storage["compression_ratio"])
+    if isinstance(raw, bool) or not isinstance(raw, int) or raw < 0:
+        raise ValueError("initial_state.raw_observations must be a non-negative integer")
+    if not math.isfinite(obc_mb) or not 0.0 <= obc_mb <= float(storage["obc_capacity_mb"]):
+        raise ValueError("initial_state.obc_data_mb must be finite and within OBC capacity")
+    jetson_mb = compressed_mb + raw * product_mb
+    if not math.isfinite(compressed_mb) or compressed_mb < 0.0:
+        raise ValueError("initial_state.jetson_compressed_mb must be finite and non-negative")
+    if jetson_mb > float(storage["jetson_capacity_mb"]):
+        raise ValueError("initial_state Jetson data exceeds Jetson capacity")
+    return {
+        "obc_data_mb": obc_mb,
+        "obc_raw_equivalent_mb": obc_mb * ratio,
+        "jetson_compressed_mb": compressed_mb,
+        "undetected_observations": int(compressed_mb * ratio / product_mb),
+        "jetson_raw_mb": raw * product_mb,
+        "uncompressed_observations": raw,
+    }
 
 
 def failure_reason(

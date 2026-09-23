@@ -253,6 +253,39 @@ def test_misrouted_or_incomplete_commands_are_rejected(actions) -> None:
         env.step(actions)
 
 
+def test_diagnostic_initial_state_preloads_pipeline_without_capture_credit() -> None:
+    config = deepcopy(expand_coordinate("eventsat/sas/ao/symb").mission_config)
+    storage = config["storage"]
+    product_mb = storage["observation_size_mb"] / storage["compression_ratio"]
+    config["initial_state"].update(
+        obc_data_mb=20.0, jetson_compressed_mb=2 * product_mb, raw_observations=2
+    )
+    env = EventSatEnvironment(config, max_steps=2, prefer_orekit=False)
+    env.reset(42)
+    assert env.state.obc_data_mb == 20.0
+    assert env.state.obc_raw_equivalent_mb == pytest.approx(20.0 * storage["compression_ratio"])
+    assert env.state.jetson_raw_mb == pytest.approx(2 * storage["observation_size_mb"])
+    assert env.state.uncompressed_observations == 2
+    assert env.state.undetected_observations == 2
+    assert env.state.total_raw_captured_mb == 0.0
+
+
+@pytest.mark.parametrize(
+    "initial",
+    [
+        {"raw_observations": -1},
+        {"raw_observations": 0.5},
+        {"obc_data_mb": 1e9},
+        {"obc_data_mb": -1.0},
+    ],
+)
+def test_invalid_initial_state_is_rejected(initial) -> None:
+    config = deepcopy(expand_coordinate("eventsat/sas/ao/symb").mission_config)
+    config["initial_state"].update(initial)
+    with pytest.raises(ValueError, match="initial_state"):
+        EventSatEnvironment(config, max_steps=2, prefer_orekit=False)
+
+
 @pytest.mark.parametrize("horizon", [36, 48, 72, 96])
 def test_runner_covers_effective_cem_horizon_and_terminal_settling(monkeypatch, horizon) -> None:
     spec = expand_coordinate("eventsat/sas/ao/symb", steps=160)

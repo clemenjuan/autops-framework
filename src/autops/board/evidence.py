@@ -460,6 +460,9 @@ def validate_result_document(payload: Any, source: Path) -> ValidatedResult:
         raise ValueError(f"{source}: episode identities are incomplete or duplicated")
 
     _validate_episode_seeds(experiment, episodes, source)
+    preloaded = (experiment.get("mission_config") or {}).get("initial_state") or {}
+    if any(float(value) != 0.0 for value in preloaded.values()):
+        raise ValueError(f"{source}: preloaded initial_state results are diagnostic only")
 
     metrics = _finite_mapping(payload.get("metrics"), source, "metric")
     means = _finite_mapping(statistics.get("mean"), source, "statistics.mean")

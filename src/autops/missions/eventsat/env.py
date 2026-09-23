@@ -39,6 +39,7 @@ from autops.missions.eventsat.transitions import (
     apply_downlink,
     apply_observe,
     failure_reason,
+    preloaded_pipeline,
 )
 from autops.orbital import apply_launch_lottery, build_orbital_context
 
@@ -77,6 +78,7 @@ class EventSatEnvironment:
             1, int(float(config["payload"]["detection_time_s"]) / self.timestep_s)
         )
         self.compression_steps = max(1, int(float(config["payload"]["compression_time_factor"])))
+        self._preloaded = preloaded_pipeline(config["initial_state"], config["storage"])
         self.reward_function = EventSatRewardFunction(config["rewards"])
         self.mission_targets = mission_targets(
             config["objectives"], self.max_steps * self.timestep_s
@@ -93,6 +95,7 @@ class EventSatEnvironment:
         self._seed = 0 if seed is None else int(seed)
         initial_soc = float(self.config["power"]["battery"]["initial_soc"])
         self.state = EventSatState(battery_soc=initial_soc)
+        self.state.accept_pipeline(self._preloaded)
         anomaly_seed = self._seed * 131 + 7919
         self._arrival_rng.seed(anomaly_seed)
         self._duration_rng.seed(anomaly_seed + 104729)

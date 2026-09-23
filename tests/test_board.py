@@ -209,6 +209,15 @@ def test_board_rejects_dirty_source_revision(tmp_path: Path) -> None:
         load_completed_run(source)
 
 
+def test_board_rejects_preloaded_initial_state(tmp_path: Path) -> None:
+    payload = result_payload()
+    payload["experiment"]["mission_config"] = {"initial_state": {"obc_data_mb": 20.0}}
+    payload["provenance"]["config_sha256"] = scientific_config_sha256(payload["experiment"])
+    source = write_result(tmp_path / "results.json", payload)
+    with pytest.raises(ValueError, match="diagnostic only"):
+        load_completed_run(source)
+
+
 def test_board_allows_distinct_configurations_of_one_coordinate(tmp_path: Path) -> None:
     first = result_payload()
     second = result_payload()

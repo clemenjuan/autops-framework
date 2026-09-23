@@ -113,7 +113,9 @@ keeps its initial target: commands issued while settling, including a policy-req
 it. Productive operation begins when the target mode is commanded after settling. The
 optional orbital backend uses Orekit Eckstein-Hechler J2 propagation; the seeded
 fallback preserves eclipse/contact structure when Java is unavailable. A command
-ignored while settling is neither forced nor a constraint violation (M-13).
+ignored while settling is neither forced nor a constraint violation (M-13). The
+`initial_state` block can preload science data for diagnostics such as reinforcement
+learning curricula; paper results start empty, and the board rejects any other result.
 
 The EventSat reward is the delivery-aligned Individual Negative reward of Juan Oliver
 et al. (EUCASS 2025): `reward_scale × (R_resource + R_action + R_mission)`. Low battery

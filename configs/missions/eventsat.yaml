@@ -109,6 +109,13 @@ storage:
   detection_metadata_mb: 0.01
   jetson_to_obc_rate_kbps: 8000
 
+# Diagnostic preloaded science data. Every paper result starts empty; the results
+# board rejects any result with a non-zero initial state.
+initial_state:
+  obc_data_mb: 0.0
+  jetson_compressed_mb: 0.0
+  raw_observations: 0
+
 payload:
   event_camera:
     resolution: [720, 1280]

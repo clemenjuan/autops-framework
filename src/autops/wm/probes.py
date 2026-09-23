@@ -87,8 +87,11 @@ class ProbeFit:
         return (values @ self.W.T + self.b).astype(np.float32)
 
 
-def build_eventsat_targets(trace: TraceDataset) -> np.ndarray:
-    """Build the eight planner attributes from simulator-native EventSat state."""
+def build_eventsat_targets(trace: TraceDataset, *, totals: bool = False) -> np.ndarray:
+    """Build the eight planner attributes from simulator-native EventSat state.
+
+    ``totals`` reports each flow as the cumulative total it accumulates instead.
+    """
 
     if trace.metadata.mission != "eventsat":
         raise ValueError("EventSat targets require an EventSat trace")
@@ -122,6 +125,8 @@ def build_eventsat_targets(trace: TraceDataset) -> np.ndarray:
 
     def incoming(name: str) -> np.ndarray:
         total = state[..., index[name]]
+        if totals:
+            return total
         flow = np.zeros_like(total)
         flow[:, 1:] = total[:, 1:] - total[:, :-1]
         return flow
@@ -137,6 +142,21 @@ def build_eventsat_targets(trace: TraceDataset) -> np.ndarray:
         forced_mode_risk=incoming_forced,
         health_nominal=state[..., index["health_nominal"]],
     )
+
+
+def objective_scale(trace: TraceDataset, episodes: Sequence[int]) -> np.ndarray:
+    """Return the per-attribute scale of preset weights over training episodes.
+
+    Stocks use their own spread. Flows use the spread of the cumulative total
+    they accumulate, which keeps the objective's historical balance: scaled by
+    the spread of single steps, one rare observation step outweighs the battery
+    by an order of magnitude, and even the analytical oracle then observes
+    instead of staging data for downlink.
+    """
+
+    spread = episode_rows(build_eventsat_targets(trace, totals=True), episodes, np.float64).std(0)
+    spread[spread < 1e-8] = 1.0
+    return spread.astype(np.float32)
 
 
 def _validate_probe_inputs(
@@ -251,5 +271,6 @@ __all__ = [
     "build_eventsat_targets",
     "eventsat_attribute_values",
     "fit_ridge_probe",
+    "objective_scale",
     "scale_attribute_weights",
 ]

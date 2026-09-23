@@ -300,3 +300,21 @@ def test_rollout_readouts_sum_flows_and_read_stocks_at_the_terminal_step() -> No
     np.testing.assert_allclose(
         rollout_attributes(readouts, ("battery_margin", "downlink_progress")), [[0.7, 0.6]]
     )
+
+
+def test_objective_scale_uses_cumulative_spread_for_flows() -> None:
+    from autops.wm.probes import DEFAULT_ATTRIBUTES, build_eventsat_targets, objective_scale
+    from autops.wm.schema import EVENTSAT_STATES
+
+    trace = _trace(np.zeros((2, 4, OBS_DIM), dtype=np.float32))
+    trace.state[..., EVENTSAT_STATES.index("data_downlinked_mb")] = [[0, 1, 2, 3], [0, 0, 0, 4]]
+    trace.state[..., EVENTSAT_STATES.index("battery_soc")] = [[0.5, 0.6, 0.7, 0.8], [0.5] * 4]
+    scale = objective_scale(trace, (0, 1))
+    totals = build_eventsat_targets(trace, totals=True).reshape(-1, len(DEFAULT_ATTRIBUTES))
+    flows = build_eventsat_targets(trace).reshape(-1, len(DEFAULT_ATTRIBUTES))
+    downlink = DEFAULT_ATTRIBUTES.index("downlink_progress")
+    battery = DEFAULT_ATTRIBUTES.index("battery_margin")
+    assert scale[downlink] == pytest.approx(totals[:, downlink].std())
+    assert scale[downlink] != pytest.approx(flows[:, downlink].std())
+    assert scale[battery] == pytest.approx(flows[:, battery].std())
+    assert scale[DEFAULT_ATTRIBUTES.index("anomaly_safe")] == 1.0

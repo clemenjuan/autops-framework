@@ -38,7 +38,7 @@ from autops.wm.schema import (
     SSA_OBSERVATIONS,
 )
 
-ARTIFACT_SCHEMA_VERSION = "autops.lewm.planner/v5"
+ARTIFACT_SCHEMA_VERSION = "autops.lewm.planner/v6"
 
 
 def checkpoint_sha256(path_like: str | Path) -> str:
@@ -183,11 +183,18 @@ class NormalizationContract:
 
 @dataclass(frozen=True)
 class ProbeContract:
+    """Affine readouts, their target statistics, and the scale of preset weights.
+
+    ``objective_scale`` divides preset weights when attribute scaling is enabled;
+    ``probes.objective_scale`` defines it from the training episodes.
+    """
+
     W: tuple[tuple[float, ...], ...]
     b: tuple[float, ...]
     attribute_names: tuple[str, ...]
     target_mean: tuple[float, ...]
     target_std: tuple[float, ...]
+    objective_scale: tuple[float, ...]
     degenerate: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
@@ -195,7 +202,8 @@ class ProbeContract:
             raise ValueError("probe.W must be a non-empty matrix")
         matrix = tuple(_finite_vector(row, "probe.W row") for row in self.W)
         object.__setattr__(self, "W", matrix)
-        for name in ("b", "target_mean", "target_std"):
+        vectors = ("b", "target_mean", "target_std", "objective_scale")
+        for name in vectors:
             object.__setattr__(self, name, _finite_vector(getattr(self, name), f"probe.{name}"))
         names = tuple(str(value) for value in self.attribute_names)
         object.__setattr__(self, "attribute_names", names)
@@ -205,10 +213,10 @@ class ProbeContract:
             raise ValueError("probe attribute_names must be non-empty and unique")
         if len(matrix) != count or any(len(row) != len(matrix[0]) for row in matrix):
             raise ValueError("probe.W must have one equal-width row per attribute")
-        if any(len(getattr(self, field)) != count for field in ("b", "target_mean", "target_std")):
+        if any(len(getattr(self, field)) != count for field in vectors):
             raise ValueError("probe vectors must have one value per attribute")
-        if any(value <= 0.0 for value in self.target_std):
-            raise ValueError("probe.target_std must be positive for safe scalarization")
+        if any(value <= 0.0 for value in (*self.target_std, *self.objective_scale)):
+            raise ValueError("probe target_std and objective_scale must be positive")
         if not set(self.degenerate) <= set(names):
             raise ValueError("degenerate targets must be named probe attributes")
 
@@ -223,12 +231,21 @@ class ProbeContract:
             "attribute_names": list(self.attribute_names),
             "target_mean": list(self.target_mean),
             "target_std": list(self.target_std),
+            "objective_scale": list(self.objective_scale),
             "degenerate": list(self.degenerate),
         }
 
     @classmethod
     def from_dict(cls, payload: Mapping[str, Any]) -> ProbeContract:
-        fields = {"W", "b", "attribute_names", "target_mean", "target_std", "degenerate"}
+        fields = {
+            "W",
+            "b",
+            "attribute_names",
+            "target_mean",
+            "target_std",
+            "objective_scale",
+            "degenerate",
+        }
         _only(payload, fields, "probe")
         return cls(
             W=tuple(tuple(row) for row in payload["W"]),
@@ -236,6 +253,7 @@ class ProbeContract:
             attribute_names=tuple(payload["attribute_names"]),
             target_mean=tuple(payload["target_mean"]),
             target_std=tuple(payload["target_std"]),
+            objective_scale=tuple(payload["objective_scale"]),
             degenerate=tuple(payload.get("degenerate", ())),
         )
 

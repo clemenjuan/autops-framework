@@ -136,7 +136,7 @@ def scalarization_weights(
     )
     if normalize:
         weights = scale_attribute_weights(
-            weights, np.asarray(artifact.probe.target_std, dtype=np.float32)
+            weights, np.asarray(artifact.probe.objective_scale, dtype=np.float32)
         )
     return weights, numeric
 

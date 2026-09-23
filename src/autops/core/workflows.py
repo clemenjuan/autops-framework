@@ -23,7 +23,13 @@ from autops.wm.artifact import (
     save_artifact,
 )
 from autops.wm.evaluation import evaluate_lewm_cem
-from autops.wm.probes import DEFAULT_ATTRIBUTES, ProbeFit, build_eventsat_targets, fit_ridge_probe
+from autops.wm.probes import (
+    DEFAULT_ATTRIBUTES,
+    ProbeFit,
+    build_eventsat_targets,
+    fit_ridge_probe,
+    objective_scale,
+)
 from autops.wm.recipe import load_eventsat_recipe
 from autops.wm.schema import EVENTSAT_OBSERVATIONS, load_trace, trace_sha256
 from autops.wm.tracking import WandbTrainingRun
@@ -213,6 +219,7 @@ def _latent_features(model: Any, observations: np.ndarray, device: str) -> np.nd
 class _PlannerFit:
     checkpoint_contract: Any
     probe: ProbeFit
+    objective_scale: np.ndarray
     ridge: float
     recipe: Any
 
@@ -244,16 +251,19 @@ def _fit_planner_probe(
         episodes=checkpoint_contract.episodes,
         seed=seed,
     )
-    return _PlannerFit(checkpoint_contract, probe, ridge_value, recipe)
+    scale = objective_scale(trace, checkpoint_contract.episodes.train)
+    return _PlannerFit(checkpoint_contract, probe, scale, ridge_value, recipe)
 
 
-def _probe_contract(probe: ProbeFit) -> ProbeContract:
+def _probe_contract(fit: _PlannerFit) -> ProbeContract:
+    probe = fit.probe
     return ProbeContract(
         W=tuple(tuple(float(value) for value in row) for row in probe.W),
         b=tuple(float(value) for value in probe.b),
         attribute_names=probe.attribute_names,
         target_mean=tuple(float(value) for value in probe.target_mean),
         target_std=tuple(float(value) for value in probe.target_std),
+        objective_scale=tuple(float(value) for value in fit.objective_scale),
         degenerate=probe.degenerate,
     )
 
@@ -302,7 +312,7 @@ def _planner_artifact(
             action_mean=tuple(float(value) for value in normalizer.action_mean),
             action_std=tuple(float(value) for value in normalizer.action_std),
         ),
-        probe=_probe_contract(fit.probe),
+        probe=_probe_contract(fit),
         probe_evidence=_probe_evidence(fit, checkpoint_path),
         cem=replace(fit.recipe.planner.cem, seed=seed),
         mode_weight_presets=fit.recipe.planner.mode_weight_presets,

@@ -62,6 +62,7 @@ def _artifact() -> PlannerArtifact:
             attribute_names=attributes,
             target_mean=(0.8, 12.0),
             target_std=(0.1, 8.0),
+            objective_scale=(0.1, 80.0),
         ),
         probe_evidence=_evidence(attributes),
         cem=CEMConfig(),
@@ -82,6 +83,7 @@ def test_artifact_is_strict_relocatable_and_scale_normalized_by_default(tmp_path
 
     assert loaded.normalize_attribute_scale is True
     assert loaded.probe.target_std == (0.1, 8.0)
+    assert loaded.probe.objective_scale == (0.1, 80.0)
     assert resolve_checkpoint(moved_path, loaded).read_bytes() == b"checkpoint"
     assert loaded.cem == CEMConfig()
     assert loaded.probe_evidence.checkpoint_size_bytes == len(b"checkpoint")
@@ -135,6 +137,7 @@ def test_artifact_rejects_missing_or_invalid_target_scale():
             attribute_names=("battery_margin",),
             target_mean=(0.0,),
             target_std=(0.0,),
+            objective_scale=(1.0,),
         )
 
 
@@ -146,6 +149,7 @@ def test_artifact_rejects_probe_or_cem_dimension_mismatch():
         attribute_names=("battery_margin",),
         target_mean=(0.0,),
         target_std=(1.0,),
+        objective_scale=(1.0,),
     )
     with pytest.raises(ValueError, match="embed_dim"):
         PlannerArtifact(
@@ -158,4 +162,16 @@ def test_artifact_rejects_probe_or_cem_dimension_mismatch():
             base.probe,
             base.probe_evidence,
             CEMConfig(action_dim=6),
+        )
+
+
+def test_artifact_rejects_non_positive_objective_scale():
+    with pytest.raises(ValueError, match="objective_scale"):
+        ProbeContract(
+            W=((0.0,) * 192,),
+            b=(0.0,),
+            attribute_names=("battery_margin",),
+            target_mean=(0.0,),
+            target_std=(1.0,),
+            objective_scale=(0.0,),
         )

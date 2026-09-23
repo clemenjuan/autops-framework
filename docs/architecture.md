@@ -162,10 +162,15 @@ the record, which the onboard record reports as its last-interval outcome. Cumul
 totals are not inputs, so their level cannot be read from a latent. The planner reads
 every predicted latent, takes stocks from the terminal one, and sums flows along the
 rollout, as physics probes decode per-step state increments from imagined latents [8] and
-world-model planners sum per-step reward predictions [2, 9].
+world-model planners sum per-step reward predictions [2, 9]. Preset weights are divided by
+an objective scale stored with the probes: a stock's own spread over the training episodes,
+and for a flow the spread of the cumulative total it accumulates. Dividing a flow by the
+spread of single steps would make one rare observation step outweigh the battery by an
+order of magnitude; in a two-day smoke run even the analytical oracle then observed
+greedily and starved the downlink pipeline.
 The relocatable planner artifact contains those probes, normalisation, action names,
 relative checkpoint path, CEM parameters, and all policy controls (reserve thresholds,
-reflexes, guidance, and shaping). The v5 artifact binds these settings at probe-fit time;
+reflexes, guidance, and shaping). The v6 artifact binds these settings at probe-fit time;
 explicit representation overrides remain part of the experiment configuration. Evaluation
 executes the same runner and representation as closed-loop planning. This representation follows the world-model control pattern
 demonstrated by Hafner et al. [2]; the exact AUTOPS contract is deliberately narrower

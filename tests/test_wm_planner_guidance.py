@@ -55,6 +55,7 @@ def _artifact() -> PlannerArtifact:
             attribute_names=attributes,
             target_mean=(0.0, 0.0),
             target_std=(1.0, 1.0),
+            objective_scale=(1.0, 1.0),
         ),
         probe_evidence=_evidence(attributes),
         cem=CEMConfig(

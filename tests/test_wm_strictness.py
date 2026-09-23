@@ -35,6 +35,7 @@ def test_probe_contract_rejects_empty_matrix() -> None:
             attribute_names=("battery_margin",),
             target_mean=(0.0,),
             target_std=(1.0,),
+            objective_scale=(1.0,),
         )
 
 

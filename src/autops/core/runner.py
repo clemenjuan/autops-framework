@@ -28,7 +28,6 @@ def eventsat_environment(
     return EventSatEnvironment(
         spec.mission_config,
         max_steps=spec.steps,
-        onboard_compute_active=spec.onboard_uses_jetson,
         anomaly_requires_ground_pass=spec.paradigm in {"ag", "conventional"},
         prefer_orekit=prefer_orekit,
         planning_horizon=planning_horizon,

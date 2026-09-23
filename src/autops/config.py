@@ -197,19 +197,6 @@ class ExperimentSpec(BaseModel):
             return self.ground_representation
         return self.representation if self.paradigm in {"ag", "conventional"} else None
 
-    @property
-    def onboard_uses_jetson(self) -> bool:
-        return self.onboard_token in {
-            "rl",
-            "hrl",
-            "llm-s",
-            "llm-a",
-            "hllm-s",
-            "hllm-a",
-            "analytical-cem",
-            "lewm-cem",
-        }
-
 
 def _validate_coordinate(coord: Coordinate, matrix: dict[str, Any]) -> None:
     cell_definitions = matrix.get("representations", {})

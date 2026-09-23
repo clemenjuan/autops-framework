@@ -41,7 +41,6 @@ def test_ao_llm_runner_records_held_actions_and_planner_compute() -> None:
     episode = result["episodes"][0]
     diagnostics = episode["decision_diagnostics"]["onboard"]
 
-    assert spec.onboard_uses_jetson
     assert diagnostics["planning_events"] == 1
     assert diagnostics["held_action_steps"] == 2
     assert episode["planner_compute_energy_wh"] > 0.0

@@ -55,7 +55,6 @@ class EventSatEnvironment:
         config: dict[str, Any],
         *,
         max_steps: int | None = None,
-        onboard_compute_active: bool = False,
         anomaly_requires_ground_pass: bool = False,
         prefer_orekit: bool = True,
         planning_horizon: int = 0,
@@ -63,7 +62,6 @@ class EventSatEnvironment:
         self.config = config
         self.timestep_s = float(config["simulation"]["timestep_s"])
         self.max_steps = int(max_steps or config["simulation"]["max_steps"])
-        self.onboard_compute_active = onboard_compute_active
         self.anomaly_requires_ground_pass = anomaly_requires_ground_pass
         self.prefer_orekit = prefer_orekit
         self.orbital_period_steps = max(

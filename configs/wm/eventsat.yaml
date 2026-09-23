@@ -1,10 +1,10 @@
 dataset:
-  schema: autops.world_model.trace/v2
+  schema: autops.world_model.trace/v3
   history: 3
   prediction_steps: 1
 
 model:
-  observation_dim: 46
+  observation_dim: 45
   action_dim: 7
   embed_dim: 192
   encoder_hidden_dim: 256

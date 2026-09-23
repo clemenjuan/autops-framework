@@ -116,6 +116,23 @@ def test_interval_feedback_is_causal_and_encoded_as_increments() -> None:
     assert _vector_value(compressing, "last_captured") == 0.0
 
 
+def test_planning_charge_reaches_the_battery_but_not_the_encoded_platform_energy() -> None:
+    observations = {}
+    for planned in (False, True):
+        env = _environment()
+        env.reset(7)
+        observations[planned] = env.step(
+            {"eventsat_0": {"mode": "charging", "jetson_planned": planned}}
+        ).observation
+    assert _metadata(observations[True])["last_interval"]["planner_energy_wh"] > 0.0
+    assert _vector_value(observations[True], "battery_soc") < _vector_value(
+        observations[False], "battery_soc"
+    )
+    assert _vector_value(observations[True], "last_platform_energy_norm") == pytest.approx(
+        _vector_value(observations[False], "last_platform_energy_norm")
+    )
+
+
 def test_countdowns_without_a_later_event_are_censored_labels() -> None:
     observation = _environment().reset(7)
     _metadata(observation).update(next_pass_known=False)

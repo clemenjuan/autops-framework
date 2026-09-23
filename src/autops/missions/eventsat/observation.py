@@ -10,6 +10,10 @@ but ``onboard_view`` removes it and the observation vector never encodes it.
 Declared constants (capacities, rates, durations) scale the vector but are not
 encoded: they are fixed in every trace row. Cumulative counters are replaced by
 last-interval increments, because monotone totals act as an elapsed-time clock.
+The encoded net energy is the platform's: the declared planner charge is left
+out because rule-based training collectors never plan, so a planner input would
+be constant in training and unseen at deployment. The battery state of charge
+still carries the drain.
 """
 
 from __future__ import annotations
@@ -216,8 +220,10 @@ def _observation_values(raw: Mapping[str, Any]) -> dict[str, float]:
             float(last["downlinked_mb"]),
             record_number(raw, "downlink_rate_kbps", 50.0) * step_s / 8000.0,
         ),
-        "last_net_energy_norm": float(last["net_energy_wh"]) / energy_scale,
-        "last_planner_energy_norm": float(last["planner_energy_wh"]) / energy_scale,
+        "last_platform_energy_norm": (
+            float(last["net_energy_wh"]) + float(last["planner_energy_wh"])
+        )
+        / energy_scale,
         **_one_hot("current_mode", str(raw.get("current_mode", "charging"))),
         **_one_hot("attitude_target", str(raw.get("previous_mode", "charging"))),
     }

@@ -90,8 +90,7 @@ EVENTSAT_OBSERVATIONS = (
     "last_detected",
     "last_obc_transfer_norm",
     "last_downlink_norm",
-    "last_net_energy_norm",
-    "last_planner_energy_norm",
+    "last_platform_energy_norm",
     *(f"current_mode_{mode}" for mode in EVENTSAT_ACTIONS),
     *(f"attitude_target_{mode}" for mode in EVENTSAT_ACTIONS),
 )

@@ -88,7 +88,7 @@ use without adding Gymnasium to the base install.
 
 A decision record at step `t` contains only information the spacecraft could hold by
 `t`. `autops.missions.eventsat.observation` owns that boundary and its vector encoding;
-`autops.wm.schema.EVENTSAT_OBSERVATIONS` fixes the 46 input names and order.
+`autops.wm.schema.EVENTSAT_OBSERVATIONS` fixes the 45 input names and order.
 
 | Group | Inputs | Encoding |
 |---|---|---|
@@ -97,7 +97,7 @@ A decision record at step `t` contains only information the spacecraft could hol
 | Resources and health | battery state of charge; OBC, raw, and compressed pool fills; health nominal | fractions; flag |
 | Payload processing | unprocessed and undetected product counts; compression and detection progress | log(1+n) / log(1+pool capacity in products); fraction of job duration |
 | Attitude and command feedback | settling remaining; last command forced to safe or to charging; last action accepted; executed mode; attitude target | fraction of settling time; flags; two one-hot blocks |
-| Last-interval outcome | product captured; compression and detection completed; bytes moved to the OBC; bytes downlinked; net and planner energy | fraction of one product or of one step's link capacity; energy / one step of peak solar generation |
+| Last-interval outcome | product captured; compression and detection completed; bytes moved to the OBC; bytes downlinked; net platform energy | fraction of one product or of one step's link capacity; energy / one step of peak solar generation |
 
 Navigation is an ideal GNSS position-velocity-time fix sampled every step from the same
 Orekit propagation as the episode [6, 7]. It is not a receiver model: no noise, delay,
@@ -119,6 +119,11 @@ The following are deliberately not inputs:
   the planner;
 - the previous requested command, which the model already receives as its action input;
 - values that are ideal constants in this simulator (navigation validity and age).
+
+The net energy input excludes the declared planner charge. Rule-based training
+collectors never plan, so a planner-energy input would be constant in training and unseen
+at deployment; the battery state of charge still carries the drain, and neither CEM
+scorer forecasts its own future compute cost.
 
 Values without a simulated sensor or subsystem model, such as voltages, temperatures,
 attitude quaternions, pointing error, link lock, or fault diagnoses, are not invented.
@@ -143,14 +148,14 @@ the settling-lead `contact_window_active` used by the communication-opportunity 
 
 The trace row stores the pre-transition observation/state and requested one-hot action;
 reward, resolved action, and forced flag describe that row's transition. The next row is
-the resulting observation. EventSat trace v2 uses the 46 observations above, 25 state
+the resulting observation. EventSat trace v3 uses the 45 observations above, 25 state
 labels, and 7 actions. SSA adds a satellite axis and uses its canonical 6-action order.
 NPZ files are pickle-free and carry names, axes, episode IDs, seeds, and a versioned
 schema. Older traces, checkpoints, and planner artifacts are rejected: a new observation
 contract requires re-export, retraining, and probe refitting, never padding or relabeling.
 
 Training and validation split launch seeds, not episode indices: every policy's
-realization of one physical episode stays on one side, and checkpoint v3 records the
+realization of one physical episode stays on one side, and checkpoint v4 records the
 per-episode seeds that define its split. With unique seeds this equals an episode shuffle.
 Dataset windows never cross episode boundaries. LeWM uses a 192-dimensional embedding
 and history 3 with a JEPA-style action-conditioned objective. Probes are affine

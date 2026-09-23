@@ -13,6 +13,7 @@ from typing import Any
 from autops.board.generator import build_manifest_board
 from autops.config import asset_root, expand_coordinate, parse_overrides, runtime_root
 from autops.core.exporter import export_traces
+from autops.core.forecast_audit import audit_recursive_forecasts
 from autops.core.probe_audit import FEATURE_FAMILIES, audit_probe_decodability
 from autops.core.runner import ExperimentRunner
 from autops.core.selection_audit import audit_candidate_selection
@@ -50,6 +51,45 @@ def _run_arguments(command: argparse.ArgumentParser, *, coordinate: bool = True)
     command.add_argument("--seeds", type=seed_values)
     command.add_argument("--set", action="append", default=[], metavar="KEY=VALUE")
     command.add_argument("--no-orekit", action="store_true")
+
+
+def _held_out_arguments(command: argparse.ArgumentParser, *, contexts: int) -> None:
+    command.add_argument("trace", type=Path)
+    command.add_argument("--artifact", type=Path, required=True)
+    command.add_argument("--output", type=Path, required=True)
+    command.add_argument("--test-trace", type=Path)
+    command.add_argument("--contexts", type=int, default=contexts)
+    command.add_argument("--near-contact-fraction", type=float, default=0.5)
+    command.add_argument("--device", default="cpu")
+    command.add_argument("--seed", type=int, default=3072)
+
+
+def _audit_parsers(training: Any) -> None:
+    audit = training.add_parser("audit", help="read frozen latents and P1 controls")
+    audit.add_argument("trace", type=Path)
+    audit.add_argument("--checkpoint", type=Path, required=True)
+    audit.add_argument("--test-trace", type=Path)
+    audit.add_argument("--features", choices=FEATURE_FAMILIES, default="latents")
+    audit.add_argument("--output", type=Path, required=True)
+    audit.add_argument("--window", type=int, default=1)
+    audit.add_argument("--mlp-epochs", type=int, default=100)
+    audit.add_argument("--hidden", default="256,128")
+    audit.add_argument("--device", default="cpu")
+    audit.add_argument("--seed", type=int, default=3072)
+    audit.add_argument("--ridge", type=float, default=1e-3)
+    audit.add_argument("--learning-rate", type=float, default=1e-3)
+    audit.add_argument("--weight-decay", type=float, default=1e-4)
+    selection = training.add_parser(
+        "selection", help="score fixed candidate banks with the learned planner and oracle"
+    )
+    _held_out_arguments(selection, contexts=64)
+    selection.add_argument("--candidates", type=int, default=256)
+    selection.add_argument("--mission-mode", default="science")
+    forecast = training.add_parser(
+        "forecast", help="score recursive forecasts under logged commands against references"
+    )
+    _held_out_arguments(forecast, contexts=256)
+    forecast.add_argument("--steps", type=int, default=48)
 
 
 def parser() -> argparse.ArgumentParser:
@@ -109,33 +149,7 @@ def parser() -> argparse.ArgumentParser:
     evaluate.add_argument("--mission-mode", default="science")
     evaluate.add_argument("--max-episodes", type=int, default=5)
     evaluate.add_argument("--set", action="append", default=[])
-    audit = training.add_parser("audit", help="read frozen latents and P1 controls")
-    audit.add_argument("trace", type=Path)
-    audit.add_argument("--checkpoint", type=Path, required=True)
-    audit.add_argument("--test-trace", type=Path)
-    audit.add_argument("--features", choices=FEATURE_FAMILIES, default="latents")
-    audit.add_argument("--output", type=Path, required=True)
-    audit.add_argument("--window", type=int, default=1)
-    audit.add_argument("--mlp-epochs", type=int, default=100)
-    audit.add_argument("--hidden", default="256,128")
-    audit.add_argument("--device", default="cpu")
-    audit.add_argument("--seed", type=int, default=3072)
-    audit.add_argument("--ridge", type=float, default=1e-3)
-    audit.add_argument("--learning-rate", type=float, default=1e-3)
-    audit.add_argument("--weight-decay", type=float, default=1e-4)
-    selection = training.add_parser(
-        "selection", help="score fixed candidate banks with the learned planner and oracle"
-    )
-    selection.add_argument("trace", type=Path)
-    selection.add_argument("--artifact", type=Path, required=True)
-    selection.add_argument("--output", type=Path, required=True)
-    selection.add_argument("--test-trace", type=Path)
-    selection.add_argument("--contexts", type=int, default=64)
-    selection.add_argument("--candidates", type=int, default=256)
-    selection.add_argument("--near-contact-fraction", type=float, default=0.5)
-    selection.add_argument("--mission-mode", default="science")
-    selection.add_argument("--device", default="cpu")
-    selection.add_argument("--seed", type=int, default=3072)
+    _audit_parsers(training)
 
     board = commands.add_parser("board", help="build the unified static results board")
     board.add_argument(
@@ -225,6 +239,18 @@ def _train(args: argparse.Namespace) -> dict[str, Any]:
             mission_mode=args.mission_mode,
             max_episodes=args.max_episodes,
             overrides=parse_overrides(args.set),
+        )
+    if args.training_command == "forecast":
+        return audit_recursive_forecasts(
+            args.trace,
+            args.artifact,
+            test_trace_path=args.test_trace,
+            output=args.output,
+            contexts=args.contexts,
+            steps=args.steps,
+            near_contact_fraction=args.near_contact_fraction,
+            device=args.device,
+            seed=args.seed,
         )
     if args.training_command == "selection":
         return audit_candidate_selection(

@@ -11,7 +11,6 @@ time alone, which bounds what an episode clock can explain.
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -19,6 +18,7 @@ from typing import Any
 import numpy as np
 
 from autops.config import asset_root
+from autops.core.offline import evaluation_record, held_out, write_evidence
 from autops.core.provenance import collect_provenance
 from autops.core.workflows import _latent_features
 from autops.wm.artifact import checkpoint_sha256
@@ -78,11 +78,8 @@ def _evaluation_data(
     targets = build_eventsat_targets(trace)
     if test_trace is None:
         return features, targets, contract.episodes
-    if test_trace.metadata.mission != "eventsat" or test_trace.n_steps != trace.n_steps:
-        raise ValueError("the test trace must be EventSat with the training episode length")
-    reused = set(test_trace.episode_seed.tolist()) & set(contract.episode_seeds)
-    if reused:
-        raise ValueError(f"test seeds also occur in the training trace: {sorted(reused)}")
+    if test_trace.n_steps != trace.n_steps:
+        raise ValueError("the test trace must have the training episode length")
     train = np.asarray(contract.episodes.train, dtype=np.int64)
     count = len(train)
     split = EpisodeSplit(
@@ -107,16 +104,6 @@ def _audit_config(settings: _AuditSettings) -> dict[str, Any]:
         "ridge": settings.ridge,
         "learning_rate": settings.learning_rate,
         "weight_decay": settings.weight_decay,
-    }
-
-
-def _evaluation(test_trace: TraceDataset | None) -> dict[str, Any]:
-    if test_trace is None:
-        return {"episodes": "checkpoint-validation"}
-    return {
-        "episodes": "test-trace",
-        "test_trace_sha256": trace_sha256(test_trace),
-        "test_seeds": [int(seed) for seed in test_trace.episode_seed],
     }
 
 
@@ -154,7 +141,8 @@ def audit_probe_decodability(
         raise ValueError("the probe audit currently targets EventSat")
     model, contract = load_checkpoint(checkpoint_path, device=device)
     contract.validate_trace(trace)
-    test_trace = None if test_trace_path is None else load_trace(test_trace_path)
+    evaluation, _ = held_out(trace, test_trace_path, contract)
+    test_trace = None if test_trace_path is None else evaluation
     X, Y, split = _evaluation_data(trace, test_trace, model, contract, settings)
     audit = compare_probe_heads(
         X,
@@ -177,17 +165,12 @@ def audit_probe_decodability(
         "trace_sha256": trace_sha256(trace),
         "checkpoint_sha256": checkpoint_sha256(checkpoint_path),
         "checkpoint_size_bytes": Path(checkpoint_path).stat().st_size,
-        "evaluation": _evaluation(test_trace),
+        "evaluation": evaluation_record(test_trace),
         "config": config,
         "provenance": collect_provenance(config, asset_root()),
         **audit.to_dict(),
     }
-    if output is not None:
-        destination = Path(output)
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", "utf-8")
-        payload["output"] = str(destination)
-    return payload
+    return write_evidence(output, payload)
 
 
 __all__ = ["FEATURE_FAMILIES", "audit_probe_decodability"]

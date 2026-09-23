@@ -61,11 +61,42 @@ def test_selection_audit_scores_one_bank_per_context(tmp_path, tiny_lewm) -> Non
 
 
 def test_selection_contexts_are_stratified_by_contact(tmp_path) -> None:
-    from autops.core.selection_audit import _contexts
+    from autops.core.offline import sample_contexts
 
     near = np.zeros((2, 10), dtype=bool)
     near[0, 3:5] = True
-    chosen = _contexts(near, (0, 1), 6, 0.5, np.random.default_rng(0))
+    chosen = sample_contexts(near, (0, 1), 6, 0.5, np.random.default_rng(0))
     flags = [flag for _, _, flag in chosen]
     assert flags.count(True) == 2 and flags.count(False) == 4
     assert all(near[episode, step] == flag for episode, step, flag in chosen)
+
+
+def test_forecast_audit_compares_rollouts_with_references(tmp_path, tiny_lewm) -> None:
+    from autops.core.forecast_audit import audit_recursive_forecasts
+
+    trace_path = _export(tmp_path / "trace.npz", [11, 12, 13, 14])
+    checkpoint = save_checkpoint(tmp_path / "model.pt", tiny_lewm(load_trace(trace_path)))
+    artifact = fit_planner_artifact(trace_path, checkpoint, tmp_path / "planner.json")["artifact"]
+
+    audit = audit_recursive_forecasts(
+        trace_path,
+        artifact,
+        test_trace_path=_export(tmp_path / "test.npz", [21, 22]),
+        contexts=4,
+        steps=3,
+    )
+    assert audit["context_count"]["all"] == 4
+    assert audit["attributes"]["downlink_progress"] == "flow"
+    assert audit["attributes"]["battery_margin"] == "stock"
+    methods = audit["metrics"]["all"]
+    assert set(methods) == {
+        "lewm-rollout",
+        "encoded-truth-readout",
+        "persistence",
+        "analytical-projection",
+    }
+    storage = methods["analytical-projection"]["storage_margin"]
+    assert len(storage["rmse"]) == 3
+    assert max(storage["rmse"]) < 1e-5
+    with pytest.raises(ValueError, match="shorter than an episode"):
+        audit_recursive_forecasts(trace_path, artifact, steps=8)

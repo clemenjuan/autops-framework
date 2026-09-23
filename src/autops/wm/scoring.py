@@ -191,7 +191,7 @@ def validate_planner_checkpoint(
             raise ValueError("checkpoint normalization does not match PlannerArtifact")
 
 
-def latent_candidate_attributes(
+def latent_rollout_readouts(
     model: Any,
     artifact: PlannerArtifact,
     observation_history: np.ndarray,
@@ -200,10 +200,10 @@ def latent_candidate_attributes(
     *,
     device: str = "cpu",
 ) -> np.ndarray:
-    """Roll learned latent candidates forward and read every predicted latent.
+    """Roll each history forward under its command sequence and read every predicted latent.
 
-    The frozen affine probes read each predicted latent; stocks come from the
-    terminal latent and flows are summed along the rollout.
+    Histories are ``[batch, history, dim]`` and sequences ``[batch, horizon]``;
+    the result holds the frozen affine readouts as ``[batch, horizon, attribute]``.
     """
 
     from autops.wm.jepa import require_torch
@@ -214,8 +214,9 @@ def latent_candidate_attributes(
     candidates = np.asarray(sequences)
     if candidates.ndim != 2 or not np.issubdtype(candidates.dtype, np.integer):
         raise ValueError("candidate sequences must be a two-dimensional integer array")
-    expected_obs = (artifact.model.history, artifact.model.obs_dim)
-    expected_actions = (artifact.model.history, artifact.model.action_dim)
+    batch = candidates.shape[0]
+    expected_obs = (batch, artifact.model.history, artifact.model.obs_dim)
+    expected_actions = (batch, artifact.model.history, artifact.model.action_dim)
     if observations.shape != expected_obs:
         raise ValueError(f"observation history must have shape {expected_obs}")
     if actions.shape != expected_actions:
@@ -228,31 +229,48 @@ def latent_candidate_attributes(
     obs_std = np.asarray(normalizer.obs_std, dtype=np.float32)
     action_mean = np.asarray(normalizer.action_mean, dtype=np.float32)
     action_std = np.asarray(normalizer.action_std, dtype=np.float32)
-    normalized_obs = ((observations - obs_mean) / obs_std).astype(np.float32)
-    normalized_actions = ((actions - action_mean) / action_std).astype(np.float32)
-    normalized_future = ((future - action_mean) / action_std).astype(np.float32)
-    count = candidates.shape[0]
     with torch.no_grad():
         latent = model.rollout(
-            torch.as_tensor(np.repeat(normalized_obs[None], count, axis=0), device=device),
-            torch.as_tensor(np.repeat(normalized_actions[None], count, axis=0), device=device),
-            torch.as_tensor(normalized_future, device=device),
+            torch.as_tensor((observations - obs_mean) / obs_std, device=device),
+            torch.as_tensor((actions - action_mean) / action_std, device=device),
+            torch.as_tensor((future - action_mean) / action_std, device=device),
         )
     predicted = latent.detach().cpu().numpy().astype(np.float32)
     matrix = np.asarray(artifact.probe.W, dtype=np.float32)
-    bias = np.asarray(artifact.probe.b, dtype=np.float32)
-    attributes = rollout_attributes(predicted @ matrix.T + bias, artifact.probe.attribute_names)
-    if attributes.shape != (count, len(artifact.probe.attribute_names)):
-        raise ValueError("learned candidate attributes have an invalid shape")
-    if not np.isfinite(attributes).all():
-        raise ValueError("learned candidate attributes contain non-finite values")
-    return attributes.astype(np.float32)
+    readouts = predicted @ matrix.T + np.asarray(artifact.probe.b, dtype=np.float32)
+    if not np.isfinite(readouts).all():
+        raise ValueError("learned readouts contain non-finite values")
+    return readouts
+
+
+def latent_candidate_attributes(
+    model: Any,
+    artifact: PlannerArtifact,
+    observation_history: np.ndarray,
+    action_history: np.ndarray,
+    sequences: np.ndarray,
+    *,
+    device: str = "cpu",
+) -> np.ndarray:
+    """Score a candidate bank from one history: terminal stocks and summed flows."""
+
+    count = np.asarray(sequences).shape[0]
+    readouts = latent_rollout_readouts(
+        model,
+        artifact,
+        np.repeat(np.asarray(observation_history, dtype=np.float32)[None], count, axis=0),
+        np.repeat(np.asarray(action_history, dtype=np.float32)[None], count, axis=0),
+        sequences,
+        device=device,
+    )
+    return rollout_attributes(readouts, artifact.probe.attribute_names)
 
 
 __all__ = [
     "analytical_candidate_attributes",
     "candidate_selection_metrics",
     "latent_candidate_attributes",
+    "latent_rollout_readouts",
     "rollout_attributes",
     "scalarization_weights",
     "validate_planner_checkpoint",

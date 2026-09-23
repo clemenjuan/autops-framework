@@ -292,7 +292,13 @@ records must re-encode to the logged observations exactly, and at sampled decisi
 scores one bank of requested command sequences with the deployed learned planner and the
 analytical oracle, each under its own information. It reports top-elite overlap, oracle
 regret, and best-candidate rate against a random-scorer chance level, overall and split by
-proximity to contact. The paper-facing
+proximity to contact. `train forecast` rolls the model out under logged commands and
+compares the frozen readouts of every predicted latent with the labelled future: stocks at
+each step and flows as sums since the decision. The references are the readout of the
+encoded true future record, which isolates the readout's own error, persistence, and the
+planner's analytical projection of the same commands from the onboard view without
+mission-policy repair. It reports RMSE and skill against the variance across contexts. The
+paper-facing
 `board` reads only approved identities from the selected paper manifest (Paper B by
 default) and verifies the result ID, commit, configuration, and checkpoint hashes.
 Diagnostic entries remain preserved but excluded. Board generation fails closed on an

@@ -496,3 +496,27 @@ def test_projection_does_not_carry_present_visibility_past_the_forecast_pass() -
         *["charging"] * 4,
     ]
     assert projected.terminal_states[0]["station_visible"] is False
+
+
+def test_command_prefixes_forecast_requested_commands_like_truth() -> None:
+    from autops.config import expand_coordinate
+    from autops.missions.eventsat.env import EventSatEnvironment
+    from autops.missions.eventsat.observation import encode_vectors
+    from autops.wm.guidance import project_command_prefixes
+
+    config = expand_coordinate("eventsat/sas/ao/symb").mission_config
+    config["anomalies"]["probability_per_step"] = 0.0
+    rng = np.random.default_rng(89)
+    for requested in rng.integers(0, 7, size=(8, 24)):
+        env = EventSatEnvironment(config, max_steps=48, prefer_orekit=False)
+        env.reset(43)
+        _, _, raw = encode_vectors(env.observe())
+        projected = project_command_prefixes(raw, requested)
+        assert projected.repair_counts.sum() == 0
+        for offset, index in enumerate(requested):
+            info = env.step({"eventsat_0": {"mode": EVENTSAT_ACTIONS[index]}}).info
+            state = projected.terminal_states[offset]
+            assert state["battery_soc"] == pytest.approx(env.state.battery_soc)
+            assert bool(projected.terminal_forced[offset]) == info["forced"]
+            for field, value in env.state.pipeline().items():
+                assert state.get(field, 0.0) == pytest.approx(value), field

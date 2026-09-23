@@ -286,6 +286,46 @@ def _set_projected_contact(
     )
 
 
+@dataclass(frozen=True)
+class _Horizon:
+    """Contact, sunlight and transition inputs shared by every projected step."""
+
+    capacities: np.ndarray
+    contacts_s: np.ndarray
+    sunlight: np.ndarray
+    parameters: PipelineParameters
+    settling: int
+
+
+def _horizon(state: Mapping[str, Any], requested: np.ndarray) -> _Horizon:
+    if requested.ndim != 2 or not np.issubdtype(requested.dtype, np.integer):
+        raise ValueError("candidate sequences must be a two-dimensional integer array")
+    if np.any((requested < 0) | (requested >= len(EVENTSAT_ACTIONS))):
+        raise ValueError("candidate sequences contain an invalid EventSat action")
+    horizon = requested.shape[1]
+    settling = max(0, int(record_number(state, "settling_time_steps")))
+    capacities = contact_capacities(state, horizon + settling + 1)
+    rate = max(1e-12, record_number(state, "downlink_rate_kbps", 50.0))
+    return _Horizon(
+        capacities=capacities,
+        contacts_s=capacities * 8000.0 / rate,
+        sunlight=_planning_sunlight(state, horizon),
+        parameters=_transition_parameters(state),
+        settling=settling,
+    )
+
+
+def _execute(simulation: dict[str, Any], action: int, horizon: _Horizon, offset: int) -> None:
+    """Advance a projected record through one requested command, as the environment would."""
+
+    effective = _resolved_action(simulation, action, horizon.settling)
+    contact_s = float(horizon.contacts_s[offset])
+    _apply_projected_action(simulation, effective, horizon.parameters, contact_s)
+    advance_projected_battery(
+        simulation, EVENTSAT_ACTIONS[effective], bool(horizon.sunlight[offset])
+    )
+
+
 def project_executable_candidates(
     state: Mapping[str, Any],
     sequences: np.ndarray,
@@ -296,20 +336,8 @@ def project_executable_candidates(
     """Propagate feasibility through every action of every candidate."""
 
     requested = np.asarray(sequences)
-    if requested.ndim != 2 or not np.issubdtype(requested.dtype, np.integer):
-        raise ValueError("candidate sequences must be a two-dimensional integer array")
-    if np.any((requested < 0) | (requested >= len(EVENTSAT_ACTIONS))):
-        raise ValueError("candidate sequences contain an invalid EventSat action")
-    horizon = requested.shape[1]
-    capacities = contact_capacities(
-        state, horizon + max(0, int(record_number(state, "settling_time_steps"))) + 1
-    )
-    rate = max(1e-12, record_number(state, "downlink_rate_kbps", 50.0))
-    contacts_s = capacities * 8000.0 / rate
-    sunlight = _planning_sunlight(state, horizon)
+    horizon = _horizon(state, requested)
     forecast = has_contact_forecast(state)
-    parameters = _transition_parameters(state)
-    settling = max(0, int(record_number(state, "settling_time_steps")))
     projected = requested.astype(np.int64, copy=True)
     repairs = np.zeros(requested.shape[0], dtype=np.int64)
     forced = np.zeros(requested.shape[0], dtype=bool)
@@ -317,27 +345,51 @@ def project_executable_candidates(
     for sample, row in enumerate(requested):
         simulation = dict(state)
         for offset, requested_value in enumerate(row):
-            _set_projected_contact(simulation, contacts_s, offset, settling)
+            _set_projected_contact(simulation, horizon.contacts_s, offset, horizon.settling)
             mask = admissible_action_mask(
                 simulation,
                 reserve_soc=reserve_soc,
                 comms_soc_floor=comms_soc_floor,
-                future_contact_mb=capacities[offset:] if forecast else None,
+                future_contact_mb=horizon.capacities[offset:] if forecast else None,
             )
             action = int(requested_value)
             if not mask[action]:
                 action = _fallback(mask, simulation)
                 repairs[sample] += 1
             projected[sample, offset] = action
-            effective = _resolved_action(simulation, action, settling)
+            _execute(simulation, action, horizon, offset)
             forced[sample] = simulation["forced"]
-            _apply_projected_action(simulation, effective, parameters, float(contacts_s[offset]))
-            advance_projected_battery(
-                simulation, EVENTSAT_ACTIONS[effective], bool(sunlight[offset])
-            )
-        _set_projected_contact(simulation, contacts_s, horizon, settling)
+        _set_projected_contact(simulation, horizon.contacts_s, requested.shape[1], horizon.settling)
         terminal.append(simulation)
     return CandidateProjection(projected, tuple(terminal), repairs, forced)
+
+
+def project_command_prefixes(state: Mapping[str, Any], commands: np.ndarray) -> CandidateProjection:
+    """Forecast one logged command sequence without mission-policy repair.
+
+    Terminal state ``k`` is the projected record after the first ``k + 1``
+    commands. It evaluates the analytical projection as a forecaster of
+    requested commands; planning uses ``project_executable_candidates``.
+    """
+
+    requested = np.asarray(commands).reshape(1, -1)
+    horizon = _horizon(state, requested)
+    simulation = dict(state)
+    states: list[dict[str, Any]] = []
+    forced: list[bool] = []
+    for offset, action in enumerate(requested[0]):
+        _set_projected_contact(simulation, horizon.contacts_s, offset, horizon.settling)
+        _execute(simulation, int(action), horizon, offset)
+        forced.append(bool(simulation["forced"]))
+        _set_projected_contact(simulation, horizon.contacts_s, offset + 1, horizon.settling)
+        states.append(dict(simulation))
+    length = requested.shape[1]
+    return CandidateProjection(
+        np.repeat(requested, length, axis=0),
+        tuple(states),
+        np.zeros(length, dtype=np.int64),
+        np.asarray(forced),
+    )
 
 
 def guided_probabilities(
@@ -375,5 +427,6 @@ __all__ = [
     "contact_capacities",
     "guided_probabilities",
     "has_contact_forecast",
+    "project_command_prefixes",
     "project_executable_candidates",
 ]

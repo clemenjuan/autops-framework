@@ -63,7 +63,8 @@ def test_canonical_config_defines_all_retargeting_presets() -> None:
     assert set(presets) == {"science", "safe", "downlink"}
     for weights in presets.values():
         assert set(weights) == set(DEFAULT_ATTRIBUTES)
-        assert sum(abs(float(value)) for value in weights.values()) == pytest.approx(1.0)
+        assert 0.9 <= sum(abs(float(value)) for value in weights.values()) <= 1.0
+        assert weights["communication_opportunity"] == 0.0
 
 
 def test_unknown_mission_mode_fails_instead_of_falling_back_to_science() -> None:

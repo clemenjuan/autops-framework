@@ -201,7 +201,9 @@ Only mandatory safe mode (anomaly or critical battery) preempts and cancels pend
 settling, in both truth and candidate projection. Only safety resolution contributes to the projected forced flag. Probe-target v2 aligns
 that flag with the incoming transition: the label for state `s_t` uses the override from
 `a_(t-1)`, and reset has no override. Contact opportunity refers to the terminal state's
-physical or settling-lead contact window. M-01…M-14 are unchanged. Changing an artifact
+physical or settling-lead contact window. It remains a fitted probe but carries no weight in
+the planning presets: contact is exogenous, so it cannot rank one decision's candidates, and
+a learned readout's dependence on commands could only be spurious. M-01…M-14 are unchanged. Changing an artifact
 or checkpoint version string cannot migrate fitted weights.
 
 Terminal affine remains the deployed readout until selection-level evidence justifies a

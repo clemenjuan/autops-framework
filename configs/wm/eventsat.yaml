@@ -63,6 +63,8 @@ planner:
   downlink_reward: 1.0
   pass_stage_reward: 0.15
   downlink_shaping_reference_weight: 0.25
+  # communication_opportunity stays a fitted probe but carries no planning weight:
+  # contact is exogenous, so it cannot rank one decision's candidates.
   mode_weight_presets:
     science:
       battery_margin: 0.14
@@ -70,7 +72,7 @@ planner:
       downlink_progress: 0.30
       science_progress: 0.28
       detection_progress: 0.08
-      communication_opportunity: 0.04
+      communication_opportunity: 0.0
       forced_mode_risk: -0.04
       anomaly_safe: 0.02
     safe:
@@ -79,7 +81,7 @@ planner:
       downlink_progress: 0.06
       science_progress: 0.03
       detection_progress: 0.02
-      communication_opportunity: 0.02
+      communication_opportunity: 0.0
       forced_mode_risk: -0.15
       anomaly_safe: 0.10
     downlink:
@@ -88,6 +90,6 @@ planner:
       downlink_progress: 0.38
       science_progress: 0.05
       detection_progress: 0.04
-      communication_opportunity: 0.06
+      communication_opportunity: 0.0
       forced_mode_risk: -0.03
       anomaly_safe: 0.02

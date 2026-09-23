@@ -277,3 +277,26 @@ def test_probe_override_target_belongs_to_incoming_transition() -> None:
         targets[..., DEFAULT_ATTRIBUTES.index("forced_mode_risk")],
         [[0, 1, 0, 1], [0, 0, 1, 0]],
     )
+
+
+def test_probe_progress_targets_are_incoming_interval_flows() -> None:
+    from autops.wm.probes import DEFAULT_ATTRIBUTES, build_eventsat_targets
+    from autops.wm.schema import EVENTSAT_STATES
+
+    trace = _trace(np.zeros((2, 4, OBS_DIM), dtype=np.float32))
+    downlinked = trace.state[..., EVENTSAT_STATES.index("data_downlinked_mb")]
+    downlinked[:] = [[5.0, 5.0, 5.375, 5.75], [0.0, 1.0, 1.0, 1.0]]
+    targets = build_eventsat_targets(trace)
+    np.testing.assert_allclose(
+        targets[..., DEFAULT_ATTRIBUTES.index("downlink_progress")],
+        [[0.0, 0.0, 0.375, 0.375], [0.0, 1.0, 0.0, 0.0]],
+    )
+
+
+def test_rollout_readouts_sum_flows_and_read_stocks_at_the_terminal_step() -> None:
+    from autops.wm.scoring import rollout_attributes
+
+    readouts = np.asarray([[[0.9, 0.1], [0.8, 0.2], [0.7, 0.3]]])
+    np.testing.assert_allclose(
+        rollout_attributes(readouts, ("battery_margin", "downlink_progress")), [[0.7, 0.6]]
+    )

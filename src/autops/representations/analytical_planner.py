@@ -53,7 +53,7 @@ class EventSatAnalyticalCEM(EventSatCEMBase):
         if projection is None:
             projection = self._project_executable(state, sequences)
         attributes = analytical_candidate_attributes(
-            projection, self.artifact.probe.attribute_names
+            state, projection, self.artifact.probe.attribute_names
         )
         scores = attributes.astype(np.float64) @ self._weights
         if not np.isfinite(scores).all():

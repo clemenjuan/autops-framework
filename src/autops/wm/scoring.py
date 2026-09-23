@@ -7,21 +7,40 @@ from typing import Any
 
 import numpy as np
 
+from autops.missions.eventsat.transitions import record_number
 from autops.wm.artifact import PlannerArtifact
 from autops.wm.cem import one_hot_sequences
 from autops.wm.guidance import CandidateProjection
 from autops.wm.probes import (
     DEFAULT_ATTRIBUTES,
+    FLOW_ATTRIBUTES,
     eventsat_attribute_values,
     scale_attribute_weights,
 )
 
 
+def rollout_attributes(readouts: np.ndarray, attribute_names: tuple[str, ...]) -> np.ndarray:
+    """Reduce per-step readouts ``[..., horizon, attribute]`` to candidate attributes.
+
+    Stocks are read at the terminal step; flows are summed over the horizon.
+    """
+
+    values = np.asarray(readouts)
+    attributes = values[..., -1, :].copy()
+    flows = [index for index, name in enumerate(attribute_names) if name in FLOW_ATTRIBUTES]
+    attributes[..., flows] = values[..., flows].sum(axis=-2)
+    return attributes
+
+
 def analytical_candidate_attributes(
+    state: Mapping[str, Any],
     projection: CandidateProjection,
     attribute_names: tuple[str, ...],
 ) -> np.ndarray:
-    """Decode one projected bank with the canonical analytical target definitions."""
+    """Decode one projected bank from ``state`` with the canonical target definitions.
+
+    Flows are the exact horizon increments of the projected cumulative counters.
+    """
 
     unknown = set(attribute_names) - set(DEFAULT_ATTRIBUTES)
     if unknown:
@@ -29,20 +48,23 @@ def analytical_candidate_attributes(
     states = projection.terminal_states
 
     def column(name: str, default: float = 0.0) -> np.ndarray:
-        return np.asarray([float(state.get(name, default)) for state in states])
+        return np.asarray([float(terminal.get(name, default)) for terminal in states])
+
+    def gained(name: str) -> np.ndarray:
+        return column(name) - record_number(state, name)
 
     stored = column("obc_data_mb") + column("jetson_raw_mb") + column("jetson_compressed_mb")
     all_attributes = eventsat_attribute_values(
         battery_soc=column("battery_soc", 0.5),
         stored_mb=stored,
         storage_capacity_mb=column("storage_capacity_mb", 4096.0),
-        data_downlinked_mb=column("data_downlinked_mb"),
-        total_observation_s=column("total_observation_s"),
-        total_detections=column("total_detections"),
+        downlinked_mb=gained("data_downlinked_mb"),
+        observation_s=gained("total_observation_s"),
+        detections=gained("total_detections"),
         communication_opportunity=column("contact_window_active") > 0.0,
         forced_mode_risk=projection.terminal_forced,
         health_nominal=np.asarray(
-            [state.get("health_status", "nominal") == "nominal" for state in states]
+            [terminal.get("health_status", "nominal") == "nominal" for terminal in states]
         ),
     )
     indices = [DEFAULT_ATTRIBUTES.index(name) for name in attribute_names]
@@ -178,7 +200,11 @@ def latent_candidate_attributes(
     *,
     device: str = "cpu",
 ) -> np.ndarray:
-    """Roll learned latent candidates forward and apply the frozen affine probes."""
+    """Roll learned latent candidates forward and read every predicted latent.
+
+    The frozen affine probes read each predicted latent; stocks come from the
+    terminal latent and flows are summed along the rollout.
+    """
 
     from autops.wm.jepa import require_torch
 
@@ -212,10 +238,10 @@ def latent_candidate_attributes(
             torch.as_tensor(np.repeat(normalized_actions[None], count, axis=0), device=device),
             torch.as_tensor(normalized_future, device=device),
         )
-    terminal = latent[:, -1].detach().cpu().numpy().astype(np.float32)
+    predicted = latent.detach().cpu().numpy().astype(np.float32)
     matrix = np.asarray(artifact.probe.W, dtype=np.float32)
     bias = np.asarray(artifact.probe.b, dtype=np.float32)
-    attributes = terminal @ matrix.T + bias
+    attributes = rollout_attributes(predicted @ matrix.T + bias, artifact.probe.attribute_names)
     if attributes.shape != (count, len(artifact.probe.attribute_names)):
         raise ValueError("learned candidate attributes have an invalid shape")
     if not np.isfinite(attributes).all():
@@ -227,6 +253,7 @@ __all__ = [
     "analytical_candidate_attributes",
     "candidate_selection_metrics",
     "latent_candidate_attributes",
+    "rollout_attributes",
     "scalarization_weights",
     "validate_planner_checkpoint",
 ]

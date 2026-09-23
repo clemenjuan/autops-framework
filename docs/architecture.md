@@ -155,6 +155,14 @@ per-episode seeds that define its split. With unique seeds this equals an episod
 Dataset windows never cross episode boundaries. LeWM uses a 192-dimensional embedding
 and history 3 with a JEPA-style action-conditioned objective. Probes are affine
 (`W`, `b`) and store target means/standard deviations plus degenerate-target labels.
+Probe targets v3 distinguish stocks from flows. Battery and storage margins, the incoming
+override, health, and contact opportunity are stocks of the labelled state. Downlink,
+science, and detection progress are flows: the amount completed in the interval ending at
+the record, which the onboard record reports as its last-interval outcome. Cumulative
+totals are not inputs, so their level cannot be read from a latent. The planner reads
+every predicted latent, takes stocks from the terminal one, and sums flows along the
+rollout, as physics probes decode per-step state increments from imagined latents [8] and
+world-model planners sum per-step reward predictions [2, 9].
 The relocatable planner artifact contains those probes, normalisation, action names,
 relative checkpoint path, CEM parameters, and all policy controls (reserve thresholds,
 reflexes, guidance, and shaping). The v5 artifact binds these settings at probe-fit time;
@@ -180,7 +188,8 @@ communication before visibility for prepointing, while the environment still gat
 transfer on physical contact. The station-visibility downlink reflex is common to both.
 
 The `analytical-cem` reference [3, 4, 5] replaces only the latent rollout/readout with
-canonical terminal attributes computed from that projection. It is a forecast oracle:
+canonical attributes computed from that projection: terminal stocks and the exact horizon
+increments of the flows. It is a forecast oracle:
 it receives the exact contact and sunlight arrays that the learned leaf must infer and
 uses the same transitions as the truth environment, so its results are an upper bound,
 not an onboard-realizable peer. Its exogenous contact and sunlight
@@ -198,18 +207,17 @@ Candidate repair, physical settling, and environment safety overrides are distin
 A slew fixes its target when it starts; commands issued while settling, including a
 policy-requested `safe`, are dropped rather than queued or used to redirect the slew.
 Only mandatory safe mode (anomaly or critical battery) preempts and cancels pending
-settling, in both truth and candidate projection. Only safety resolution contributes to the projected forced flag. Probe-target v2 aligns
-that flag with the incoming transition: the label for state `s_t` uses the override from
-`a_(t-1)`, and reset has no override. Contact opportunity refers to the terminal state's
+settling, in both truth and candidate projection. Only safety resolution contributes to the projected forced flag. Probe targets
+align that flag and the flows with the incoming transition: the labels for state `s_t` come
+from `a_(t-1)`, and reset has no override and zero flows. Contact opportunity refers to the
 physical or settling-lead contact window. It remains a fitted probe but carries no weight in
 the planning presets: contact is exogenous, so it cannot rank one decision's candidates, and
 a learned readout's dependence on commands could only be spurious. M-01…M-14 are unchanged. Changing an artifact
 or checkpoint version string cannot migrate fitted weights.
 
-Terminal affine remains the deployed readout until selection-level evidence justifies a
-change. `autops.wm.scoring.candidate_selection_metrics` compares terminal-affine,
-windowed-affine, and MLP scores on one shared bank using top-elite overlap and analytical
-regret; probe R²/AUC alone is not deployment evidence.
+Affine readouts remain deployed until selection-level evidence justifies a change.
+`autops.wm.scoring.candidate_selection_metrics` compares scorers on one shared bank using
+top-elite overlap and analytical regret; probe R²/AUC alone is not deployment evidence.
 
 A planning event powers the Jetson for the whole decision step in which it plans:
 
@@ -314,3 +322,8 @@ Tracked source and public documentation contain no service endpoint or credentia
 7. A. P. M. Chiaradia, H. K. Kuga, and A. F. B. A. Prado, “Onboard and Real-Time
    Artificial Satellite Orbit Determination Using GPS,” *Mathematical Problems in
    Engineering*, 2013. [doi:10.1155/2013/530516](https://doi.org/10.1155/2013/530516)
+8. Z. Li, C. Ren, P. Wang, and X. Sun, “Orbit-Planner: Towards Latent World Models for
+   On-Orbit Obstacle Avoidance of Satellite Agents,” preprint, 2026.
+   [doi:10.48550/arXiv.2608.16651](https://doi.org/10.48550/arXiv.2608.16651)
+9. N. Hansen, H. Su, and X. Wang, “TD-MPC2: Scalable, Robust World Models for
+   Continuous Control,” ICLR, 2024. [arXiv:2310.16828](https://arxiv.org/abs/2310.16828)

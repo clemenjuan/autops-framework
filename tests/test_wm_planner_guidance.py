@@ -258,6 +258,9 @@ def test_projection_propagates_complete_pipeline_through_future_actions() -> Non
         uncompressed_observations=1,
         detection_time_steps=5,
         planning_contact_seconds=[0.0] * 8 + [60.0, 0.0],
+        data_downlinked_mb=50.0,
+        total_observation_s=600.0,
+        total_detections=7,
     )
     requested = np.asarray(
         [
@@ -278,18 +281,19 @@ def test_projection_propagates_complete_pipeline_through_future_actions() -> Non
 
     np.testing.assert_array_equal(projection.sequences, requested)
     assert projection.repair_counts[0] == 0
-    assert terminal["total_detections"] == 1
+    assert terminal["total_detections"] == 8
     assert terminal["jetson_raw_mb"] == pytest.approx(0.0)
     assert terminal["jetson_compressed_mb"] == pytest.approx(0.0)
     assert terminal["obc_data_mb"] == pytest.approx(0.0)
-    assert terminal["data_downlinked_mb"] > 1.8
+    assert terminal["data_downlinked_mb"] > 51.8
     attributes = analytical_candidate_attributes(
+        state,
         projection,
         ("science_progress", "detection_progress", "downlink_progress"),
     )
     assert attributes[0, 0] == 0.0
     assert attributes[0, 1] == 1.0
-    assert attributes[0, 2] > 1.8
+    assert 1.8 < attributes[0, 2] < 1.9
 
 
 def test_projection_repairs_invalid_future_actions_and_propagates_battery() -> None:
@@ -413,7 +417,7 @@ def test_identical_repaired_commands_receive_identical_analytical_scores() -> No
         comms_soc_floor=0.25,
     )
     np.testing.assert_array_equal(projection.sequences, [[0], [0]])
-    attributes = analytical_candidate_attributes(projection, ("forced_mode_risk",))
+    attributes = analytical_candidate_attributes(_state(), projection, ("forced_mode_risk",))
     np.testing.assert_array_equal(attributes, [[0.0], [0.0]])
 
 

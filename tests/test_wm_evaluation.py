@@ -210,4 +210,4 @@ def test_recipe_policy_controls_are_exported_and_used_by_deployment(
     assert not planner.mission_action_mask({"battery_soc": 0.8})[1]
     explicit = EventSatLeWMCEM({"artifact_path": fitted["artifact"], "reserve_soc": 0.5})
     assert explicit._reserve_soc == 0.5
-    assert explicit.artifact.target_definition_version.endswith("/v2")
+    assert explicit.artifact.target_definition_version.endswith("/v3")

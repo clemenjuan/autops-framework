@@ -11,7 +11,7 @@ import numpy as np
 from autops.wm.dataset import EpisodeSplit, episode_rows, split_episodes
 from autops.wm.schema import TraceDataset
 
-TARGET_DEFINITION_VERSION = "autops.eventsat.probe-targets/v2"
+TARGET_DEFINITION_VERSION = "autops.eventsat.probe-targets/v3"
 
 DEFAULT_ATTRIBUTES = (
     "battery_margin",
@@ -24,28 +24,41 @@ DEFAULT_ATTRIBUTES = (
     "anomaly_safe",
 )
 
+# Progress attributes are flows: the amount completed in the interval that ends
+# at a record, which the onboard record states through its last-interval outcome.
+# Cumulative totals are not onboard inputs, so their level cannot be read from a
+# latent; a planner sums flow readouts along a rollout, as physics probes decode
+# per-step state increments (Li et al. 2026, arXiv:2608.16651) and world-model
+# planners sum per-step reward predictions (DreamerV3, arXiv:2301.04104; TD-MPC2,
+# arXiv:2310.16828). The remaining attributes are stocks read at a state.
+FLOW_ATTRIBUTES = ("downlink_progress", "science_progress", "detection_progress")
+
 
 def eventsat_attribute_values(
     *,
     battery_soc: np.ndarray,
     stored_mb: np.ndarray,
     storage_capacity_mb: np.ndarray,
-    data_downlinked_mb: np.ndarray,
-    total_observation_s: np.ndarray,
-    total_detections: np.ndarray,
+    downlinked_mb: np.ndarray,
+    observation_s: np.ndarray,
+    detections: np.ndarray,
     communication_opportunity: np.ndarray,
     forced_mode_risk: np.ndarray,
     health_nominal: np.ndarray,
 ) -> np.ndarray:
-    """Compute the canonical eight EventSat attributes for any matching axes."""
+    """Compute the canonical eight EventSat attributes for any matching axes.
+
+    ``downlinked_mb``, ``observation_s`` and ``detections`` are amounts completed
+    over an interval, not cumulative totals.
+    """
 
     capacity = np.maximum(np.asarray(storage_capacity_mb), 1.0)
     values = (
         np.clip((np.asarray(battery_soc) - 0.20) / 0.80, 0.0, 1.0),
         np.clip(1.0 - np.asarray(stored_mb) / capacity, 0.0, 1.0),
-        np.asarray(data_downlinked_mb),
-        np.asarray(total_observation_s) / 3600.0,
-        np.asarray(total_detections),
+        np.asarray(downlinked_mb),
+        np.asarray(observation_s) / 3600.0,
+        np.asarray(detections),
         np.asarray(communication_opportunity),
         np.asarray(forced_mode_risk),
         np.asarray(health_nominal),
@@ -102,16 +115,24 @@ def build_eventsat_targets(trace: TraceDataset) -> np.ndarray:
     )
     # A trace row stores s_t and the outgoing override for a_t. The latent at
     # s_t must be labeled with the incoming transition a_(t-1), not a future
-    # command that was unavailable when s_t was predicted. Reset has no override.
+    # command that was unavailable when s_t was predicted. Reset has no
+    # incoming interval, so its override and flows are zero.
     incoming_forced = np.zeros_like(trace.forced_mode)
     incoming_forced[:, 1:] = trace.forced_mode[:, :-1]
+
+    def incoming(name: str) -> np.ndarray:
+        total = state[..., index[name]]
+        flow = np.zeros_like(total)
+        flow[:, 1:] = total[:, 1:] - total[:, :-1]
+        return flow
+
     return eventsat_attribute_values(
         battery_soc=state[..., index["battery_soc"]],
         stored_mb=stored,
         storage_capacity_mb=capacity,
-        data_downlinked_mb=state[..., index["data_downlinked_mb"]],
-        total_observation_s=state[..., index["total_observation_s"]],
-        total_detections=state[..., index["total_detections"]],
+        downlinked_mb=incoming("data_downlinked_mb"),
+        observation_s=incoming("total_observation_s"),
+        detections=incoming("total_detections"),
         communication_opportunity=state[..., index["contact_window_active"]] > 0.5,
         forced_mode_risk=incoming_forced,
         health_nominal=state[..., index["health_nominal"]],
@@ -224,6 +245,7 @@ def scale_attribute_weights(weights: np.ndarray, target_std: np.ndarray) -> np.n
 
 __all__ = [
     "DEFAULT_ATTRIBUTES",
+    "FLOW_ATTRIBUTES",
     "TARGET_DEFINITION_VERSION",
     "ProbeFit",
     "build_eventsat_targets",

@@ -33,8 +33,8 @@ planning is motivated by Hafner et al. [5] and the LeWorldModel formulation [6].
 
 `analytical-cem` is its model-based reference, in the sampling-based
 CEM-MPC tradition [7, 8, 9]. It uses the same CEM, candidate projection,
-scalarisation, guidance, plan-hold, and safety controls, but scores terminal
-attributes from shared deterministic EventSat transitions, conditional on the almanac
+scalarisation, guidance, plan-hold, and safety controls, but scores the same
+attributes (terminal stocks, horizon flows) from shared deterministic EventSat transitions, conditional on the almanac
 and persistent current health (future anomalies and compute events are not predicted). Contact and sunlight
 lookahead come from the environment's active orbit backend, so Orekit propagation is
 computed once as the authoritative almanac rather than duplicated per candidate.

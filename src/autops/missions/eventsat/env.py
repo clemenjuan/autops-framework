@@ -272,9 +272,15 @@ class EventSatEnvironment:
         }
 
     def _parse_action(self, actions: dict[str, Any]) -> tuple[str, bool]:
-        raw = actions.get(self.satellite_id, {}) if isinstance(actions, dict) else {}
-        raw = raw if isinstance(raw, dict) else {}
-        return str(raw.get("mode", "charging")), bool(raw.get("jetson_planned", False))
+        """Reject misrouted commands instead of silently commanding charging."""
+
+        keys = sorted(actions) if isinstance(actions, dict) else []
+        if keys != [self.satellite_id]:
+            raise ValueError(f"EventSat expects exactly one command for {self.satellite_id!r}")
+        raw = actions[self.satellite_id]
+        if not isinstance(raw, dict) or "mode" not in raw:
+            raise ValueError(f"{self.satellite_id!r} command must be a mapping with a mode")
+        return str(raw["mode"]), bool(raw.get("jetson_planned", False))
 
     def _settle(self, resolved: str, mandatory_safe: bool) -> tuple[str, bool, bool]:
         """Return the effective mode, whether it settles, and whether the command is ignored."""

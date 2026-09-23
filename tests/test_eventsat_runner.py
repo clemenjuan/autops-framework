@@ -240,6 +240,19 @@ def test_invalid_commands_cannot_bypass_mandatory_safety(condition: str) -> None
     assert outcome.info["safety_safe"] == 1.0
 
 
+@pytest.mark.parametrize(
+    "actions",
+    [{}, {"sat_0": {"mode": "charging"}}, {"eventsat_0": {}}, {"eventsat_0": "charging"}],
+)
+def test_misrouted_or_incomplete_commands_are_rejected(actions) -> None:
+    env = EventSatEnvironment(
+        expand_coordinate("eventsat/sas/ao/symb").mission_config, max_steps=2, prefer_orekit=False
+    )
+    env.reset(42)
+    with pytest.raises(ValueError, match="eventsat_0"):
+        env.step(actions)
+
+
 @pytest.mark.parametrize("horizon", [36, 48, 72, 96])
 def test_runner_covers_effective_cem_horizon_and_terminal_settling(monkeypatch, horizon) -> None:
     spec = expand_coordinate("eventsat/sas/ao/symb", steps=160)

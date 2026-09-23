@@ -91,6 +91,18 @@ def check_constraints(state: dict[str, Any], proposed_mode: str = "charging") ->
         warnings.append(
             {"constraint": "battery_preferred", "reason": "SoC is below the preferred 0.35."}
         )
+    settling = _settling(state, proposed_mode, safety_forced=health != "nominal" or soc <= hard_soc)
+    if settling["command_ignored"]:
+        # An ongoing slew keeps its initial target: the command is ignored, not queued,
+        # and therefore neither a violation beyond an invalid mode nor productive.
+        return {
+            "proposed_mode": proposed_mode,
+            "feasible": proposed_mode in MODES,
+            "productive_this_step": False,
+            **settling,
+            "violations": [item for item in violations if item["constraint"] == "mode"],
+            "warnings": [_settling_warning(settling)],
+        }
 
     if proposed_mode == "communication":
         productive = record_number(state, "obc_data_mb", 0.0) > 0
@@ -125,6 +137,9 @@ def check_constraints(state: dict[str, Any], proposed_mode: str = "charging") ->
     elif proposed_mode == "payload_send":
         productive = record_number(state, "jetson_compressed_mb", 0.0) > 0
 
+    if settling["transition_steps_required"]:
+        productive = False
+        warnings.append(_settling_warning(settling))
     if not productive and proposed_mode not in {"charging", "safe"}:
         warnings.append(
             {"constraint": "pipeline", "reason": "The candidate makes no pipeline progress now."}
@@ -133,9 +148,52 @@ def check_constraints(state: dict[str, Any], proposed_mode: str = "charging") ->
         "proposed_mode": proposed_mode,
         "feasible": not violations,
         "productive_this_step": productive,
+        **settling,
         "violations": violations,
         "warnings": warnings,
     }
+
+
+def _settling(state: dict[str, Any], proposed_mode: str, *, safety_forced: bool) -> dict[str, Any]:
+    """Attitude consequence of a command under the environment's slew rule.
+
+    A slew fixes its target when it starts; commands while settling are ignored,
+    and only environment-enforced safety preempts it.
+    """
+
+    settling_steps = int(record_number(state, "settling_time_steps", 0.0))
+    remaining = int(record_number(state, "transition_steps_remaining", 0.0))
+    target = str(state.get("previous_mode", "charging"))
+    maneuver_modes = set(state.get("attitude_maneuver_modes") or ())
+    active = not safety_forced and settling_steps > 0
+    ignored = active and remaining > 0
+    starts = (
+        active
+        and not ignored
+        and proposed_mode != target
+        and (proposed_mode in maneuver_modes or target in maneuver_modes)
+    )
+    return {
+        "command_ignored": ignored,
+        "transition_steps_required": remaining if ignored else settling_steps if starts else 0,
+        "transition_target_mode": target if ignored else proposed_mode if starts else None,
+    }
+
+
+def _settling_warning(settling: dict[str, Any]) -> dict[str, str]:
+    steps = settling["transition_steps_required"]
+    target = settling["transition_target_mode"]
+    if settling["command_ignored"]:
+        reason = (
+            f"Slew toward {target} in progress ({steps} settling step(s) left); this command "
+            "is ignored and not queued; this step resolves to charging."
+        )
+    else:
+        reason = (
+            f"Request starts {steps} non-productive settling step(s) toward {target}; this "
+            "step resolves to charging and later commands cannot retarget the slew."
+        )
+    return {"constraint": "attitude_settling", "reason": reason}
 
 
 def _get_feasible_modes(state: dict[str, Any]) -> list[str]:

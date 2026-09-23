@@ -95,6 +95,29 @@ def test_onboard_tools_permit_prepointing_while_ground_tools_require_a_pass() ->
     assert visible["pipeline_progress_mb"] == pytest.approx(0.375)
 
 
+def test_what_if_tools_follow_the_slew_rule() -> None:
+    state = {
+        "battery_soc": 0.8,
+        "obc_data_mb": 2.0,
+        "station_visible": True,
+        "settling_time_steps": 2,
+        "attitude_maneuver_modes": ("communication", "payload_observe"),
+        "previous_mode": "charging",
+    }
+    starts = check_constraints(state, "payload_observe")
+    assert starts["feasible"] and not starts["productive_this_step"]
+    assert starts["transition_steps_required"] == 2
+    assert starts["transition_target_mode"] == "payload_observe"
+    settling = {**state, "transition_steps_remaining": 1, "previous_mode": "payload_observe"}
+    ignored = check_constraints(settling, "communication")
+    assert ignored["command_ignored"] and not ignored["productive_this_step"]
+    assert ignored["transition_target_mode"] == "payload_observe"
+    assert evaluate_plan(settling, "communication")["estimated_utility"] == 0.0
+    assert not check_constraints({**settling, "battery_soc": 0.1}, "safe")["command_ignored"]
+    arrived = check_constraints({**state, "previous_mode": "payload_observe"}, "payload_observe")
+    assert arrived["transition_steps_required"] == 0 and arrived["productive_this_step"]
+
+
 def test_agentic_registry_advertises_only_what_if_tools() -> None:
     assert SCHEDULE_TOOL_NAMES == ["check_constraints", "evaluate_plan"]
     assert [item["name"] for item in get_tool_schemas()] == SCHEDULE_TOOL_NAMES

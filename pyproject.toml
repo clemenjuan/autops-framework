@@ -26,7 +26,12 @@ wm = [
   "wandb>=0.28,<0.29",
 ]
 paper = ["matplotlib>=3.9"]
-rl = []
+rl = [
+  "gymnasium>=1.0",
+  "ray[rllib]==2.44.0",
+  "torch>=2.3",
+  "wandb>=0.28,<0.29",
+]
 
 [project.scripts]
 autops = "autops.cli:main"
@@ -48,6 +53,7 @@ markers = [
   "orekit: requires Java and Orekit",
   "llm_live: calls a live language-model provider",
   "slow: long-running scientific acceptance check",
+  "rl: requires the rl extra (Gymnasium, RLlib, Torch)",
 ]
 
 [tool.ruff]

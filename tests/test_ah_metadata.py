@@ -68,7 +68,6 @@ def test_ground_override_retains_energy_for_work_already_done() -> None:
             "eventsat_0": {
                 "mode": "payload_observe",
                 "jetson_planned": True,
-                "planner_active_s": 9.0,
             }
         }
     )
@@ -84,4 +83,4 @@ def test_ground_override_retains_energy_for_work_already_done() -> None:
     decision = paradigm.act(observation, physical_contact=False)
     assert decision.actions["eventsat_0"]["mode"] == "communication"
     outcome = env.step(decision.actions)
-    assert outcome.info["planner_compute_energy_wh"] == pytest.approx(7 * 9 / 3600)
+    assert outcome.info["planner_compute_energy_wh"] == pytest.approx(7 * 60 / 3600)

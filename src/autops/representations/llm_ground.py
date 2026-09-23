@@ -155,7 +155,7 @@ class LLMSchedulePlanner(Representation):
         self._held_modes = expand_schedule(schedule)[:remaining_steps]
         self._planning_events += 1
         self._planning_latency_s += elapsed
-        return self._onboard_action(mode, planned=True, planner_active_s=elapsed)
+        return self._onboard_action(mode, planned=True)
 
     def _retry_seed(self, attempt: int) -> int:
         """Per-attempt seed override so a validation retry draws a fresh sample.
@@ -409,17 +409,8 @@ class LLMSchedulePlanner(Representation):
         self._held_action_steps = 0
         self._planning_latency_s = 0.0
 
-    def _onboard_action(
-        self,
-        mode: str,
-        *,
-        planned: bool,
-        planner_active_s: float = 0.0,
-    ) -> dict[str, Any]:
-        action: dict[str, Any] = {"mode": mode, "jetson_planned": planned}
-        if planned:
-            action["planner_active_s"] = max(0.0, planner_active_s)
-        return {"eventsat_0": action}
+    def _onboard_action(self, mode: str, *, planned: bool) -> dict[str, Any]:
+        return {"eventsat_0": {"mode": mode, "jetson_planned": planned}}
 
 
 @register("llm-s", mission="eventsat", role="ground")

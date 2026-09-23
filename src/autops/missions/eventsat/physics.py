@@ -186,15 +186,21 @@ def power_step(
     }
 
 
-def planner_event_energy_wh(config: dict[str, Any], mode: str, *, active_time_s: float) -> float:
-    """Return incremental event energy under the declared assumed/measured model."""
+def planner_event_energy_wh(config: dict[str, Any], mode: str) -> float:
+    """Return the declared incremental energy of one planning event.
+
+    Planning powers the Jetson for the whole decision step in which it plans, so
+    the charge is independent of the host that runs the simulation. Modes that
+    already power the Jetson pay nothing extra. Measured planning time remains a
+    diagnostic and never enters the energy budget.
+    """
 
     power = config["power"]
     if mode in set(power.get("jetson_active_modes", [])):
         return 0.0
     model = power.get("planner_compute", {})
     active_w = max(0.0, float(power.get("onboard_compute_w", 0.0)))
-    active_s = max(0.0, float(active_time_s))
+    active_s = float(config["simulation"]["timestep_s"])
     boot_wh = max(0.0, float(model.get("boot_energy_wh", 0.0)))
     idle_w = max(0.0, float(model.get("idle_power_w", 0.0)))
     idle_s = max(0.0, float(model.get("idle_time_s", 0.0)))

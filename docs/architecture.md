@@ -42,9 +42,10 @@ Onboard LLM representations use the same AO boundary as other planners. A local 
 produces one immediate action and a bounded schedule, the adapter executes held actions
 for `plan_hold`, and only a new planning event invokes the model again. The hybrid LLM
 variants recheck every held action against fresh telemetry before execution; the mission
-environment still applies the final physical and safety resolution. Measured inference
-time is carried as `planner_active_s`, while the mission power model converts that time
-to incremental energy only in modes where the Jetson base load is otherwise absent.
+environment still applies the final physical and safety resolution. A planning event
+powers the Jetson for its decision step; the mission power model charges that energy only
+in modes where the Jetson base load is otherwise absent. Measured inference time is a
+diagnostic and never enters the energy budget.
 
 ## Package boundaries
 
@@ -190,7 +191,7 @@ rejected rather than padded with invented contact or sunlight. Ground almanac re
 advance these deterministic arrays along with the planning clock. Action-dependent power, settling, storage, and byte-pipeline dynamics remain the
 same shared functions used by the truth environment. The projection is conditional on the supplied almanac and current health: it does not
 sample future anomalies or predict anomaly clearance. It also excludes future planner
-compute events, whose measured cost is charged by the actual environment. These
+compute events, whose declared cost is charged by the actual environment. These
 assumptions must accompany an analytical-reference claim.
 
 Candidate repair, physical settling, and environment safety overrides are distinct.
@@ -208,16 +209,17 @@ change. `autops.wm.scoring.candidate_selection_metrics` compares terminal-affine
 windowed-affine, and MLP scores on one shared bank using top-elite overlap and analytical
 regret; probe R²/AUC alone is not deployment evidence.
 
-Planner compute uses an event model rather than a full-step surrogate:
+A planning event powers the Jetson for the whole decision step in which it plans:
 
 \[
-E_{event}=P_{active}t_{plan}+E_{boot}+P_{idle}t_{idle}.
+E_{event}=P_{active}\,\Delta t+E_{boot}+P_{idle}t_{idle},
 \]
 
-`planner_active_s` is measured around CEM or local LLM execution. The power and
-boot/idle terms are declared under `power` in the mission configuration and are labelled
-`assumed` unless replaced by hardware evidence. Incremental planner energy is zero in
-modes whose base load already includes the Jetson. Board-level INA3221 rails cannot
+with the 60 s step `Δt`. This is an accounting bound that makes the charge independent
+of the host running the simulation; measured CEM or LLM time is kept only as a diagnostic.
+The power and boot/idle terms are declared under `power` in the mission configuration and
+are labelled `assumed` unless replaced by hardware evidence. Incremental planner energy is
+zero in modes whose base load already includes the Jetson. Board-level INA3221 rails cannot
 replace the scalar model unless a non-overlapping total-input boundary is established;
 the current hardware results therefore retain every exposed rail separately.
 

@@ -22,7 +22,7 @@ before a decisive action. This bounded agent loop is informed by ReAct [3] and b
 language-agent architecture surveys [4]. Hybrid variants use the identical model
 response but pass it through deterministic mission grounding and safety constraints.
 For AO, an LLM decision supplies one immediate action plus a short schedule; the
-onboard adapter holds that schedule for `plan_hold` steps and measures only planning
+onboard adapter holds that schedule for `plan_hold` steps and charges only planning
 events as incremental Jetson compute. Hybrid AO rechecks each held action against fresh
 telemetry, while the environment remains the final safety authority.
 

@@ -127,7 +127,7 @@ class EventSatEnvironment:
         return bool(self.orbit and self.orbit.is_ground_pass_active(self.state.step))
 
     def step(self, actions: dict[str, Any]) -> EnvironmentStep:
-        requested, planner_active_s, planned = self._parse_action(actions)
+        requested, planned = self._parse_action(actions)
         mandatory_safe = safety_required(
             battery_soc=self.state.battery_soc,
             minimum_soc=float(self.config["power"]["battery"]["min_soc"]),
@@ -143,11 +143,7 @@ class EventSatEnvironment:
         safety_safe = effective == "safe"
         sunlight = bool(self.orbit and self.orbit.is_in_sunlight(self.state.step))
         contact_s = float(self.orbit.contact_seconds(self.state.step)) if self.orbit else 0.0
-        planner_energy_wh = (
-            planner_event_energy_wh(self.config, effective, active_time_s=planner_active_s)
-            if planned
-            else 0.0
-        )
+        planner_energy_wh = planner_event_energy_wh(self.config, effective) if planned else 0.0
         energy = power_step(
             self.state,
             self.config,
@@ -267,13 +263,10 @@ class EventSatEnvironment:
             ],
         }
 
-    def _parse_action(self, actions: dict[str, Any]) -> tuple[str, float, bool]:
+    def _parse_action(self, actions: dict[str, Any]) -> tuple[str, bool]:
         raw = actions.get(self.satellite_id, {}) if isinstance(actions, dict) else {}
         raw = raw if isinstance(raw, dict) else {}
-        mode = str(raw.get("mode", "charging"))
-        planned = bool(raw.get("jetson_planned", False))
-        active_s = max(0.0, float(raw.get("planner_active_s", 0.0))) if planned else 0.0
-        return mode, active_s, planned
+        return str(raw.get("mode", "charging")), bool(raw.get("jetson_planned", False))
 
     def _settle(self, resolved: str, mandatory_safe: bool) -> tuple[str, bool]:
         state = self.state

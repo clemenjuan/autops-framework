@@ -257,7 +257,6 @@ class EventSatCEMBase(Representation):
             int(sequence[0]),
             planned=True,
             rationale=f"{self.token} planning event score={result.score:.6g}",
-            planner_active_s=elapsed,
         )
 
     def _proposal_probabilities(self) -> np.ndarray:
@@ -393,14 +392,7 @@ class EventSatCEMBase(Representation):
             return charging
         return int(np.flatnonzero(mask)[0])
 
-    def _choose(
-        self,
-        index: int,
-        *,
-        planned: bool,
-        rationale: str,
-        planner_active_s: float = 0.0,
-    ) -> dict[str, Any]:
+    def _choose(self, index: int, *, planned: bool, rationale: str) -> dict[str, Any]:
         self._last_action = int(index)
         if self._action_history:
             self._action_history[-1] = np.eye(self.artifact.model.action_dim, dtype=np.float32)[
@@ -408,10 +400,7 @@ class EventSatCEMBase(Representation):
             ]
         mode = self.artifact.model.action_names[index]
         self._last_rationale = rationale
-        action: dict[str, Any] = {"mode": mode, "jetson_planned": planned}
-        if planned:
-            action["planner_active_s"] = max(0.0, float(planner_active_s))
-        return {"eventsat_0": action}
+        return {"eventsat_0": {"mode": mode, "jetson_planned": planned}}
 
 
 __all__ = ["EventSatCEMBase"]

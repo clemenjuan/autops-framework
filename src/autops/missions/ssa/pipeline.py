@@ -6,7 +6,11 @@ from collections import Counter
 from copy import deepcopy
 from typing import TYPE_CHECKING, Any
 
-from autops.missions.ssa.model import DetectionBatch, record_step
+from autops.missions.ssa.model import (
+    DetectionBatch,
+    custody_record_is_better,
+    estimate_is_better,
+)
 from autops.missions.ssa.targets import OpticalAccess, detection_draw
 
 if TYPE_CHECKING:
@@ -149,18 +153,14 @@ def record_detection(
         "relay_hops": 0,
     }
     current = runtime.estimates.get(access.object_id)
-    if current is None or record["quality"] > float(current.get("quality", 0.0)):
+    if current is None or estimate_is_better(record, current):
         runtime.estimates[access.object_id] = deepcopy(record)
     else:
+        # Re-observing a known object refreshes its age even without a better track.
         current["last_refresh_step"] = max(
             int(current.get("last_refresh_step", 0)),
             observation_step,
         )
     held = runtime.undelivered.get(access.object_id)
-    held_step = record_step(held) if held is not None else -1
-    if (
-        held is None
-        or observation_step > held_step
-        or (observation_step == held_step and record["quality"] >= float(held.get("quality", 0.0)))
-    ):
+    if held is None or custody_record_is_better(record, held):
         runtime.undelivered[access.object_id] = deepcopy(record)

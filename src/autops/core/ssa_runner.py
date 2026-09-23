@@ -9,7 +9,7 @@ from autops.config import ExperimentSpec, asset_root, deep_merge
 from autops.core.provenance import collect_provenance
 from autops.missions.eventsat.metrics import experiment_statistics
 from autops.missions.ssa.env import SSAEnvironment
-from autops.organisations import create_organisation
+from autops.organisations import bind_communication_topology, create_organisation
 
 
 def _episode_config(spec: ExperimentSpec) -> dict[str, Any]:
@@ -38,6 +38,7 @@ def _run_episode(spec: ExperimentSpec, episode_id: int, seed: int) -> dict[str, 
     controller = create_organisation(spec.organisation, _organisation_config(spec))
     observation = env.reset(seed)
     controller.reset(seed, observation)
+    bind_communication_topology(controller.organisation, env)
     total_reward = 0.0
     while int(observation["step"]) < spec.steps:
         actions = controller.act(observation)

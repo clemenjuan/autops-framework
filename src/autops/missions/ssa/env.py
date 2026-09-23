@@ -57,6 +57,8 @@ class SSAEnvironment:
         self.link_budget = LinkBudget.from_mapping(self.config["isl"])
         self._position_provider: Callable[[str, float], tuple[float, float, float]] | None = None
         self._isl_capacity_cache: dict[tuple[str, str], float] | None = None
+        # None keeps every physical ISL usable; an organisation may bind its topology.
+        self._authorized_links: set[tuple[str, str]] | None = None
         self.current_step = 0
         self.seed = 0
         self.targets: list[Target] = []
@@ -259,6 +261,25 @@ class SSAEnvironment:
             for object_id, observed_step in self._freshest_ground_steps().items()
             if self.current_step - observed_step <= self.custody_tau_steps
         }
+
+    def configure_communication_links(self, links: set[tuple[str, str]] | None) -> None:
+        """Bind organisation-authorised directed ISL endpoints; physics still gates them."""
+
+        known = set(self.satellite_ids)
+        invalid = sorted(
+            link for link in links or () if not set(link) <= known or link[0] == link[1]
+        )
+        if invalid:
+            raise ValueError(f"unknown or self ISL links: {invalid}")
+        self._authorized_links = None if links is None else set(links)
+
+    def authorized_isl_destinations(self, source: str) -> list[str]:
+        return [
+            destination
+            for destination in self.satellite_ids
+            if destination != source
+            and (self._authorized_links is None or (source, destination) in self._authorized_links)
+        ]
 
     def satellite_position(self, satellite_id: str, epoch_s: float) -> tuple[float, float, float]:
         if self._position_provider is not None:

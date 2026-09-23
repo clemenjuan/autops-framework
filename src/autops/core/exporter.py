@@ -16,7 +16,7 @@ from autops.missions.eventsat.observation import encode_vectors
 from autops.missions.eventsat.physics import MODES as EVENTSAT_MODES
 from autops.missions.ssa.env import SSAEnvironment
 from autops.missions.ssa.policy import SSA_MODES
-from autops.organisations import create_organisation
+from autops.organisations import bind_communication_topology, create_organisation
 from autops.wm.schema import (
     SSA_OBSERVATIONS,
     SSA_STATES,
@@ -163,6 +163,7 @@ def _ssa_trace(spec: ExperimentSpec) -> TraceDataset:
         controller = create_organisation(spec.organisation, _organisation_config(spec))
         observation = env.reset(seed)
         controller.reset(seed, observation)
+        bind_communication_topology(controller.organisation, env)
         rows: dict[str, list[Any]] = {
             name: []
             for name in (

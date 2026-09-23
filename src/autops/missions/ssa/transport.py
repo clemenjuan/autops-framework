@@ -6,7 +6,11 @@ from copy import deepcopy
 from typing import TYPE_CHECKING, Any
 
 from autops.missions.ssa.geometry import ground_contact_seconds, link_capacity_bytes
-from autops.missions.ssa.model import record_step
+from autops.missions.ssa.model import (
+    custody_record_is_better,
+    estimate_is_better,
+    record_step,
+)
 
 if TYPE_CHECKING:
     from autops.missions.ssa.env import SSAEnvironment
@@ -91,102 +95,128 @@ def apply_isl(
     epoch_s: float,
     per_satellite: dict[str, dict[str, Any]],
 ) -> None:
-    sharers = [satellite_id for satellite_id, mode in modes.items() if mode == "isl_share"]
+    """Share knowledge and relay custody records, one hop per step.
+
+    Every sharer's knowledge and custody buffer is snapshotted before any
+    transfer, relays are planned from the snapshots, and both are committed
+    afterwards, so nothing received this step is forwarded this step
+    (agentic framework d31385d). Receivers must be authorised, idle, and
+    physically reachable.
+    """
+
+    sharers = [
+        satellite_id for satellite_id in env.satellite_ids if modes[satellite_id] == "isl_share"
+    ]
     if not sharers:
         return
+    knowledge = {
+        source: (
+            list(env.satellites[source].detection_row),
+            deepcopy(env.satellites[source].estimates),
+        )
+        for source in sharers
+    }
+    custody = {source: deepcopy(env.satellites[source].undelivered) for source in sharers}
+    feasible = {source: _feasible_receivers(env, source, modes, epoch_s) for source in sharers}
+    relays: list[tuple[str, str, str, dict[str, Any]]] = []
+    for source in sharers:
+        per_satellite[source]["isl_feasible_receivers"] = sorted(feasible[source])
+        if feasible[source] and bool(env.config["ssa"]["isl_relay"]):
+            relays.extend(_plan_relays(env, source, custody[source], feasible[source]))
+    for source in sharers:
+        for destination in sorted(feasible[source]):
+            merge_knowledge(env, knowledge[source], destination)
+    _commit_relays(env, relays)
+
+
+def _feasible_receivers(
+    env: SSAEnvironment, source: str, modes: dict[str, str], epoch_s: float
+) -> dict[str, float]:
     capacities = (
         env._episode_isl_capacities()
         if bool(env.config["constellation"].get("share_plane", False))
         else None
     )
-    end_s = epoch_s + env.timestep_s
     resolution = float(env.config["isl"]["substep_resolution_s"])
     cache: dict[tuple[str, float], tuple[float, float, float]] = {}
-    for source in sharers:
-        feasible: dict[str, float] = {}
-        for destination in env.satellite_ids:
-            if destination == source:
-                continue
-            env.stats.isl_attempts += 1
-            if modes[destination] not in {"charging", "safe", "isl_share"}:
-                continue
-            if capacities is not None:
-                capacity = capacities[(min(source, destination), max(source, destination))]
-            else:
-                capacity = link_capacity_bytes(
-                    env.satellite_position,
-                    source,
-                    destination,
-                    epoch_s,
-                    end_s,
-                    env.link_budget,
-                    resolution_s=resolution,
-                    cache=cache,
-                )
-            if capacity <= 0.0:
-                continue
+    feasible: dict[str, float] = {}
+    for destination in env.authorized_isl_destinations(source):
+        env.stats.isl_attempts += 1
+        if modes[destination] not in {"charging", "safe", "isl_share"}:
+            continue
+        if capacities is not None:
+            capacity = capacities[(min(source, destination), max(source, destination))]
+        else:
+            capacity = link_capacity_bytes(
+                env.satellite_position,
+                source,
+                destination,
+                epoch_s,
+                epoch_s + env.timestep_s,
+                env.link_budget,
+                resolution_s=resolution,
+                cache=cache,
+            )
+        if capacity > 0.0:
             env.stats.isl_successes += 1
             feasible[destination] = capacity
-            merge_knowledge(env, source, destination)
-        per_satellite[source]["isl_feasible_receivers"] = sorted(feasible)
-        if not feasible or not bool(env.config["ssa"]["isl_relay"]):
-            continue
-        destinations = (
-            [max(feasible, key=feasible.get)]
-            if bool(env.config["isl"]["unicast"])
-            else list(feasible)
-        )
-        for destination in destinations:
-            relay_records(env, source, destination, feasible[destination])
+    return feasible
 
 
-def merge_knowledge(env: SSAEnvironment, source: str, destination: str) -> None:
-    source_state = env.satellites[source]
+def merge_knowledge(
+    env: SSAEnvironment,
+    snapshot: tuple[list[int], dict[str, dict[str, Any]]],
+    destination: str,
+) -> None:
+    """Merge a sender's snapshot; received estimates keep their own acquisition age."""
+
+    row, estimates = snapshot
     destination_state = env.satellites[destination]
-    for index, value in enumerate(source_state.detection_row):
+    for index, value in enumerate(row):
         destination_state.detection_row[index] = max(destination_state.detection_row[index], value)
-    for object_id, source_record in source_state.estimates.items():
+    for object_id, estimate in estimates.items():
         destination_state.first_known_steps.setdefault(object_id, env.current_step)
-        destination_record = destination_state.estimates.get(object_id)
-        if destination_record is None or float(source_record.get("quality", 0.0)) > float(
-            destination_record.get("quality", 0.0)
-        ):
-            merged = deepcopy(source_record)
-            merged["last_refresh_step"] = env.current_step
-            destination_state.estimates[object_id] = merged
-        else:
-            destination_record["last_refresh_step"] = env.current_step
+        current = destination_state.estimates.get(object_id)
+        if current is None or estimate_is_better(estimate, current):
+            destination_state.estimates[object_id] = deepcopy(estimate)
 
 
-def relay_records(
+def _plan_relays(
     env: SSAEnvironment,
     source: str,
-    destination: str,
-    capacity_bytes: float,
-) -> None:
-    source_buffer = env.satellites[source].undelivered
-    destination_buffer = env.satellites[destination].undelivered
-    budget = capacity_bytes
-    for object_id in sorted(source_buffer, key=lambda key: record_step(source_buffer[key])):
-        if budget < env.record_size_bytes:
-            break
-        record = deepcopy(source_buffer.pop(object_id))
-        budget -= env.record_size_bytes
+    buffer: dict[str, dict[str, Any]],
+    feasible: dict[str, float],
+) -> list[tuple[str, str, str, dict[str, Any]]]:
+    """Allocate snapshot records to receivers within each link's byte budget."""
+
+    if bool(env.config["isl"]["unicast"]):
+        best = min(feasible.items(), key=lambda item: (-item[1], item[0]))
+        targets = [best]
+    else:
+        targets = sorted(feasible.items())
+    available = sorted(buffer, key=lambda object_id: (record_step(buffer[object_id]), object_id))
+    plans: list[tuple[str, str, str, dict[str, Any]]] = []
+    for destination, capacity in targets:
+        budget = capacity
+        while available and budget >= env.record_size_bytes:
+            object_id = available.pop(0)
+            plans.append((source, destination, object_id, buffer[object_id]))
+            budget -= env.record_size_bytes
+    return plans
+
+
+def _commit_relays(env: SSAEnvironment, plans: list[tuple[str, str, str, dict[str, Any]]]) -> None:
+    for source, _, object_id, _ in plans:
+        env.satellites[source].undelivered.pop(object_id, None)
+    for _, destination, object_id, snapshot in plans:
+        record = deepcopy(snapshot)
         record["relay_hops"] = int(record.get("relay_hops", 0)) + 1
         env.stats.isl_records_relayed += 1
         env.stats.isl_bytes_transferred += env.record_size_bytes
-        held = destination_buffer.get(object_id)
-        held_step = record_step(held) if held is not None else -1
-        candidate_step = record_step(record)
-        if (
-            held is None
-            or candidate_step > held_step
-            or (
-                candidate_step == held_step
-                and float(record.get("quality", 0.0)) > float(held.get("quality", 0.0))
-            )
-        ):
-            destination_buffer[object_id] = record
+        buffer = env.satellites[destination].undelivered
+        held = buffer.get(object_id)
+        if held is None or custody_record_is_better(record, held):
+            buffer[object_id] = record
 
 
 def apply_ground_downlinks(

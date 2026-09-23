@@ -412,3 +412,56 @@ def test_ssa_ground_link_retains_records_exceeding_byte_budget(sunlit_geometry: 
     assert result.info["per_satellite"]["sat_0"]["downlinked_records"] == 0
     assert "visible" in env.satellites["sat_0"].undelivered
     assert not env.ground_archive["visible"]
+
+
+def _linked_env(satellites: int = 3) -> SSAEnvironment:
+    config = _config(satellites=satellites, steps=1)
+    config["constellation"]["share_plane"] = True
+    env = SSAEnvironment(config)
+    env.reset(seed=1)
+    ids = env.satellite_ids
+    env._isl_capacity_cache = {
+        (left, right): 10.0 * env.record_size_bytes
+        for index, left in enumerate(ids)
+        for right in ids[index + 1 :]
+    }
+    return env
+
+
+def test_isl_moves_knowledge_and_records_at_most_one_hop_per_step() -> None:
+    env = _linked_env()
+    env._isl_capacity_cache[("sat_0", "sat_2")] = 0.0
+    record = {"object_id": "visible", "obs_step": 0, "quality": 1.0, "satellite_id": "sat_0"}
+    env.satellites["sat_0"].undelivered["visible"] = dict(record)
+    env.satellites["sat_0"].estimates["visible"] = {**record, "last_refresh_step": 0}
+    modes = {"sat_0": "isl_share", "sat_1": "isl_share", "sat_2": "charging"}
+    apply_isl(env, modes, 0.0, {satellite_id: {} for satellite_id in env.satellite_ids})
+    assert "visible" in env.satellites["sat_1"].undelivered
+    assert "visible" in env.satellites["sat_1"].estimates
+    assert "visible" not in env.satellites["sat_2"].undelivered
+    assert "visible" not in env.satellites["sat_2"].estimates
+
+
+def test_repeated_or_inferior_messages_keep_the_acquisition_age() -> None:
+    env = _linked_env(2)
+    env.current_step = 50
+    old = {"object_id": "visible", "obs_step": 3, "quality": 0.5, "last_refresh_step": 3}
+    env.satellites["sat_0"].estimates["visible"] = dict(old)
+    env.satellites["sat_1"].estimates["visible"] = {**old, "quality": 0.9, "last_refresh_step": 7}
+    modes = {"sat_0": "isl_share", "sat_1": "charging"}
+    apply_isl(env, modes, 0.0, {satellite_id: {} for satellite_id in env.satellite_ids})
+    assert env.satellites["sat_1"].estimates["visible"]["last_refresh_step"] == 7
+    del env.satellites["sat_1"].estimates["visible"]
+    apply_isl(env, modes, 0.0, {satellite_id: {} for satellite_id in env.satellite_ids})
+    assert env.satellites["sat_1"].estimates["visible"]["last_refresh_step"] == 3
+
+
+def test_authorised_links_restrict_isl_destinations() -> None:
+    env = _linked_env()
+    env.configure_communication_links({("sat_0", "sat_2")})
+    modes = {"sat_0": "isl_share", "sat_1": "charging", "sat_2": "charging"}
+    per_satellite = {satellite_id: {} for satellite_id in env.satellite_ids}
+    apply_isl(env, modes, 0.0, per_satellite)
+    assert per_satellite["sat_0"]["isl_feasible_receivers"] == ["sat_2"]
+    with pytest.raises(ValueError, match="unknown or self"):
+        env.configure_communication_links({("sat_0", "sat_0")})

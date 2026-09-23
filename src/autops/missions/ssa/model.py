@@ -59,3 +59,35 @@ class SatelliteRuntime:
 
 def record_step(record: dict[str, Any]) -> int:
     return int(record.get("obs_step", record.get("step", 0)))
+
+
+def _origin(record: dict[str, Any]) -> tuple[str, str]:
+    return str(record.get("satellite_id", "")), str(record.get("object_id", ""))
+
+
+def estimate_is_better(candidate: dict[str, Any], current: dict[str, Any]) -> bool:
+    """Knowledge ranks by track quality, then acquisition step, then stable origin."""
+
+    candidate_quality, current_quality = (
+        float(candidate.get("quality", 0.0)),
+        float(current.get("quality", 0.0)),
+    )
+    if candidate_quality != current_quality:
+        return candidate_quality > current_quality
+    if record_step(candidate) != record_step(current):
+        return record_step(candidate) > record_step(current)
+    return _origin(candidate) < _origin(current)
+
+
+def custody_record_is_better(candidate: dict[str, Any], held: dict[str, Any]) -> bool:
+    """Custody records rank by recency first, since custody values fresh delivery."""
+
+    if record_step(candidate) != record_step(held):
+        return record_step(candidate) > record_step(held)
+    candidate_quality, held_quality = (
+        float(candidate.get("quality", 0.0)),
+        float(held.get("quality", 0.0)),
+    )
+    if candidate_quality != held_quality:
+        return candidate_quality > held_quality
+    return _origin(candidate) < _origin(held)

@@ -310,6 +310,14 @@ rule-based policy treats that as coordination. The `linked` view keeps the earli
 idealised neighbour telemetry, counted as one message per neighbour and step; a future
 bandwidth/failure study must define and validate those message costs explicitly.
 
+ISL sharing snapshots every sharer's knowledge and custody buffer before any transfer,
+plans record relays from the snapshots, and commits both afterwards, so an estimate or
+record travels at most one hop per step. A received estimate keeps its own acquisition
+age, and a repeated or inferior message changes nothing; a satellite's own
+re-observation still refreshes it. Estimates rank by track quality, custody records by
+recency, each with a stable tie-break. Only organisation-authorised, idle, physically
+reachable satellites receive.
+
 ## Commands and runtime data
 
 ```bash

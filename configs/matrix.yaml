@@ -11,8 +11,7 @@ representations:
     substrate: subsymbolic-rl
     action_space: single-shot
     shield: false
-    implemented: false
-    reserved: true
+    implemented: true
   hrl:
     substrate: hybrid-rl-symbolic
     action_space: single-shot
@@ -52,7 +51,7 @@ representations:
 
 # Historical 32-cell EventSat baseline. The runnable mission declaration below
 # adds six AO planners and five LeWM-AH pairings, so the union is currently 43
-# declared study cells, of which 23 are executable. rl/hrl remain reserved.
+# declared study cells, of which 24 are executable. hrl remains reserved.
 canonical_eventsat_32:
   conventional:
     ground: [symb]
@@ -73,7 +72,7 @@ missions:
       ag:
         ground: [symb, llm-s, llm-a, hllm-s, hllm-a]
       ao:
-        onboard: [symb, llm-s, llm-a, hllm-s, hllm-a, analytical-cem, lewm-cem]
+        onboard: [symb, rl, llm-s, llm-a, hllm-s, hllm-a, analytical-cem, lewm-cem]
       ah:
         onboard: [symb, lewm-cem]
         ground: [symb, llm-s, llm-a, hllm-s, hllm-a]

@@ -10,8 +10,8 @@ from typing import Any
 
 import numpy as np
 
-from autops.config import asset_root, expand_coordinate, load_yaml
-from autops.core.provenance import collect_provenance
+from autops.config import asset_root, expand_coordinate, load_yaml, runtime_root
+from autops.core.provenance import collect_provenance, scientific_config_sha256
 from autops.core.runner import ExperimentRunner
 from autops.core.tracking import WandbTrainingRun
 from autops.wm.artifact import (
@@ -114,6 +114,59 @@ def run_sweep(
         result = ExperimentRunner(spec, prefer_orekit=prefer_orekit).run()
         summaries.append({"coordinate": coordinate, "metrics": result["metrics"]})
     return {"coordinates": coordinates, "completed": len(summaries), "results": summaries}
+
+
+def train_rl(
+    coordinate: str,
+    output: str | Path,
+    *,
+    steps: int | None = None,
+    overrides: dict[str, Any] | None = None,
+    recipe_path: Path | None = None,
+    recipe_overrides: dict[str, Any] | None = None,
+    prefer_orekit: bool = True,
+    wandb_project: str = "space-rl",
+    wandb_entity: str | None = None,
+    wandb_name: str | None = None,
+) -> dict[str, Any]:
+    """Train a coordinate's ``rl`` policy with RLlib PPO under required W&B tracking."""
+
+    from autops.rl.spaces import rl_spec
+    from autops.rl.training import RLlibPPOTrainer, load_recipe
+
+    spec = expand_coordinate(coordinate, steps=steps, overrides=overrides)
+    if spec.onboard_token != "rl":
+        raise ValueError(f"{coordinate} has no onboard rl representation to train")
+    recipe = load_recipe(spec.mission, recipe_path, recipe_overrides)
+    destination = Path(output)
+    destination = destination if destination.is_absolute() else runtime_root() / destination
+    tracker = WandbTrainingRun.start(
+        project=wandb_project,
+        entity=wandb_entity,
+        name=wandb_name or f"autops-{spec.name}-ppo",
+        config={
+            "coordinate": spec.coordinate,
+            "config_sha256": scientific_config_sha256(spec.model_dump(mode="json")),
+            "observation_schema_id": rl_spec(spec.mission).schema_id,
+            "recipe": recipe,
+        },
+        job_type="train-ppo",
+        tags=("autops", "rl"),
+    )
+    try:
+        checkpoint = RLlibPPOTrainer(
+            spec, recipe, destination, prefer_orekit=prefer_orekit, tracker=tracker
+        ).train()
+    except BaseException:
+        tracker.finish(exit_code=1)
+        raise
+    run_id, run_url = tracker.run_id, tracker.url
+    tracker.finish(exit_code=0)
+    return {
+        "coordinate": spec.coordinate,
+        "checkpoint": str(checkpoint),
+        "wandb": {"project": wandb_project, "run_id": run_id, "url": run_url},
+    }
 
 
 def train_world_model(

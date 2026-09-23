@@ -1,0 +1,38 @@
+# PPO recipe for the EventSat onboard `rl` representation, as validated on the
+# agentic framework's main branch (Schulman et al. 2017, arXiv:1707.06347).
+# Override keys for a run with `autops train rl ... --recipe-set key=value`.
+
+seed: 42
+timesteps: 10000000
+max_iterations: 100000
+# 0 keeps only the final checkpoint; otherwise snapshots land in step_<sampled steps>.
+checkpoint_every_timesteps: 0
+
+# Rollouts and resources.
+num_env_runners: 4
+num_gpus: 1
+rollout_fragment: 128
+train_batch_size: 4096
+minibatch_size: 256
+
+# Optimisation.
+lr: 0.0001
+lr_schedule: [[0, 0.0001], [3000000, 0.00001]]
+gamma: 0.995
+gae_lambda: 0.98
+clip_ratio: 0.3
+ppo_epochs: 30
+entropy_coef: 0.001
+value_coef: 1.0
+max_grad_norm: 0.5
+
+# Network and multi-agent weight sharing (shared_all, shared_by_role, independent_per_agent).
+hidden_size: 256
+policy_sharing: shared_all
+
+# Optional potential-based shaping, a training aid added by the RLlib bridge only
+# (Ng, Harada & Russell 1999); potential is delivery or raw_progress.
+pipeline_shaping:
+  enabled: false
+  potential: delivery
+  scale: 1.0

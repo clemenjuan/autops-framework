@@ -11,9 +11,9 @@ from autops.wm.recipe import load_eventsat_recipe
 from autops.wm.schema import load_trace, trace_sha256
 
 
-def test_matrix_sweep_expands_runtime_cells_without_reserved_rl() -> None:
+def test_matrix_sweep_expands_runtime_cells_without_reserved_hrl() -> None:
     coordinates = matrix_coordinates("eventsat")
-    assert len(coordinates) == 23
+    assert len(coordinates) == 24
     assert "eventsat/sas/ag/symb" in coordinates
     assert {f"eventsat/sas/ao/{token}" for token in ("llm-s", "llm-a", "hllm-s", "hllm-a")} <= set(
         coordinates
@@ -21,7 +21,11 @@ def test_matrix_sweep_expands_runtime_cells_without_reserved_rl() -> None:
     assert "eventsat/sas/ao/analytical-cem" in coordinates
     assert "eventsat/sas/ao/lewm-cem" in coordinates
     assert "eventsat/sas/ah/lewm-cem/hllm-a" in coordinates
-    assert not any("/rl" in coordinate or "/hrl" in coordinate for coordinate in coordinates)
+    assert "eventsat/sas/ao/rl" in coordinates
+    assert [coordinate for coordinate in coordinates if "rl" in coordinate.split("/")] == [
+        "eventsat/sas/ao/rl"
+    ]
+    assert not any("hrl" in coordinate for coordinate in coordinates)
 
 
 def test_eventsat_declared_design_extends_historical_32_to_43_cells() -> None:
@@ -40,7 +44,7 @@ def test_eventsat_declared_design_extends_historical_32_to_43_cells() -> None:
     runnable = {tuple(coordinate.split("/")[2:]) for coordinate in matrix_coordinates("eventsat")}
 
     assert len(baseline) == 32
-    assert len(runnable) == 23
+    assert len(runnable) == 24
     assert len(baseline | runnable) == 43
 
 

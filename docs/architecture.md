@@ -57,15 +57,16 @@ diagnostic and never enters the energy budget.
 | `autops.orbital` | Orekit/fallback propagation, eclipse/access, link and ISL budgets | scheduling policy |
 | `autops.paradigms` | CG/AG/AO/AH authority, latency, stale-view semantics | physics constants |
 | `autops.organisations` | SAS/CMAS/DMAS/HMAS/IMAS task and knowledge allocation | sensing/link truth |
-| `autops.representations` | symbolic, LLM/hybrid, and LeWM-CEM plugins | runner special cases |
+| `autops.representations` | symbolic, RL, LLM/hybrid, and LeWM-CEM plugins | runner special cases |
+| `autops.rl` | RLlib bridge, mission adapters, PPO trainer, checkpoint manifests, shaping | mission physics or a second reward |
 | `autops.llm` | environment-selected clients, SHA-256 cache, deterministic mock, prompts | mission-state mutation |
 | `autops.wm` | trace/dataset, JEPA model/training, probes, artifact, CEM | duplicate mission adapters |
 | `autops.board` | validation and static rendering of completed results | metric recomputation or placeholder data |
 
 Optional dependencies are lazy. Importing core AUTOPS does not import Torch, start a
 JVM, or contact an LLM endpoint. `orbital`, `llm`, and `wm` extras activate those
-surfaces; the empty `rl` extra reserves the future contribution without pulling in an
-RL stack.
+surfaces, and the `rl` extra adds RLlib, Gymnasium, Torch, and W&B for `autops train rl`.
+Deploying an `rl` checkpoint restores only the trained policy, so no Ray workers start.
 
 ## Representation plugin seam
 
@@ -318,6 +319,22 @@ re-observation still refreshes it. Estimates rank by track quality, custody reco
 recency, each with a stable tie-break. Only organisation-authorised, idle, physically
 reachable satellites receive.
 
+## Reinforcement-learning path
+
+`autops.rl` is the agentic framework's RLlib stack behind the base structure. The
+RLlib bridge exposes one agent per organisation agent: it distributes the observation
+through the organisation layer, encodes each view with the mission's adapter (for
+EventSat, the onboard vector above, so `rl` sees exactly what `lewm-cem` sees), decodes
+and shields the chosen modes, collects them through the organisation, and steps the
+canonical environment. The runner deploys the same adapter and shield, and a parity
+test drives both paths with identical actions. Training episodes draw launch seeds from
+10^6 upwards, keeping the small paired evaluation seeds unseen. The reward is the
+mission's; optional potential-based pipeline shaping is added only inside the bridge.
+Every checkpoint, including intermediate `step_<sampled steps>` snapshots, carries a
+manifest with the observation schema and names, per-policy spaces, recipe, and
+public-safe provenance; loading rejects any other contract, and results record the
+deployed policy's identity. Mock-policy results are never boardable.
+
 ## Commands and runtime data
 
 ```bash
@@ -325,6 +342,7 @@ uv run autops run COORDINATE [--episodes N] [--seeds A:B] [--set key=value]
 uv run autops sweep MISSION [filters]
 uv run autops export COORDINATE [COORDINATE ...] [run options]
 uv run autops train wm ...
+uv run autops train rl COORDINATE --output DIR [--recipe-set key=value]
 uv run autops train probes ...
 uv run autops train evaluate TRACE --artifact PLANNER.json --output EVAL.json
 uv run autops train audit ...

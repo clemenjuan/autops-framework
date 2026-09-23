@@ -16,7 +16,7 @@
 - Experiments are matrix coordinates expanded from `configs/matrix.yaml`, never generated per-cell YAML.
 - One `ExperimentSpec` in `autops.config`; no legacy names or compatibility aliases.
 - Representation plugins implement `encode_observation`, `select_action`, optional `update`, and `last_rationale`; decorator registration is discovered automatically.
-- `rl` and `hrl` are reserved, deferred cells. Keep Gymnasium-compatible observation/action seams, but ship no RLlib, Torch-RL, or stand-ins.
+- `rl` is the RLlib PPO representation of `autops.rl`, ported from the agentic framework; its extra carries RLlib, Gymnasium, Torch, and W&B. Training and evaluation share the mission adapters, the organisation layer, and the controller-visible shield. `hrl` stays reserved; ship no stand-ins.
 - The world model is an ordinary representation. Training and deployment share the schema, artifact contract, and CEM implementation in `autops.wm`.
 - Fixed memory is the fairness invariant. Writable online memory is deferred behind the interface.
 - Prefer files below 500 lines and functions below 80 lines; split by concern before exceeding them.
@@ -35,7 +35,7 @@
 
 # Working practices
 
-- Run `uv sync --extra dev` for local development; add `--extra orbital`, `--extra llm`, or `--extra wm` only when needed.
+- Run `uv sync --extra dev` for local development; add `--extra orbital`, `--extra llm`, `--extra wm`, or `--extra rl` only when needed.
 - Live LLM access comes only from `OLLAMA_HOST` or `OPENAI_API_KEY`; tests always use the deterministic mock.
 - LLM responses use a SHA256 cache under ignored runtime storage. A cache hit reports no new provider latency or token usage.
 - Orekit requires Java 17 and `orekit-data.zip` at repository root.

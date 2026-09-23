@@ -13,7 +13,7 @@ functions.
 | Axis | Tokens | Meaning |
 |---|---|---|
 | Organisation | `sas`, `cmas`, `dmas`, `hmas`, `imas` | single agent; centralised, decentralised, hierarchical, or independent multi-agent scheduling |
-| Representation | `symb`, `llm-s`, `llm-a`, `hllm-s`, `hllm-a`, `analytical-cem`, `lewm-cem` | rules; plan-and-hold LLM single-shot/agentic; symbolically shielded LLM; analytical or learned latent CEM MPC |
+| Representation | `symb`, `rl`, `llm-s`, `llm-a`, `hllm-s`, `hllm-a`, `analytical-cem`, `lewm-cem` | rules; PPO policy; plan-and-hold LLM single-shot/agentic; symbolically shielded LLM; analytical or learned latent CEM MPC |
 | Paradigm | `conventional`, `ag`, `ao`, `ah` | conventional ground, autonomous ground, autonomous onboard, or dual-core hybrid authority |
 
 The LLM distinction is operational rather than rhetorical: `llm-s` makes one bounded
@@ -42,17 +42,20 @@ Because it is given the exact future that `lewm-cem` must infer from its onboard
 observation, `analytical-cem` is a forecast-oracle upper bound, not an onboard peer
 (see the information boundary in [architecture](architecture.md)).
 
-`rl` and `hrl` are reserved names, with `implemented: false` in `matrix.yaml`. They
-cannot be expanded or run. A future PPO/RLlib contribution can implement the common
-representation protocol and Gymnasium-style `SpaceSpec` seam without changing any
-coordinate. AUTOPS ships no RL library, neural policy, or symbolic stand-in.
+`rl` is a PPO policy [10] trained with RLlib per coordinate, ported from the agentic
+framework. It decides every step from the same onboard information boundary as
+`lewm-cem`, runs its small network on the OBC without a Jetson charge, and passes the
+controller-visible shield used in training (anomaly to `safe`, low battery to
+`charging`). It is optimised for the reward described below; the evaluation metrics
+are M-01…M-14 as for every representation. `hrl` remains reserved with
+`implemented: false` and cannot be expanded or run.
 
 ## EventSat matrix
 
 EventSat now has three distinct counts. The historical baseline remains the canonical
 32-cell design, the union of that baseline and the presently declared extensions has 43
-study cells, and 23 of those cells are executable today. Keeping these counts separate
-prevents reserved RL coordinates from being mistaken for implementations.
+study cells, and 24 of those cells are executable today. Keeping these counts separate
+prevents declared but unimplemented coordinates from being mistaken for implementations.
 
 The historical baseline is:
 
@@ -77,17 +80,17 @@ The declared study total is therefore `32 + 4 + 2 + 5 = 43`. The executable subs
 |---|---:|
 | `conventional` | 1 |
 | `ag` | 5 |
-| `ao` | 7 |
+| `ao` | 8 |
 | `ah` | 10 |
-| **Total** | **23** |
+| **Total** | **24** |
 
 - `conventional`: ground `symb`;
 - `ag`: ground `symb`, `llm-s`, `llm-a`, `hllm-s`, or `hllm-a`;
-- `ao`: onboard `symb`, `llm-s`, `llm-a`, `hllm-s`, `hllm-a`, `analytical-cem`, or `lewm-cem`;
+- `ao`: onboard `symb`, `rl`, `llm-s`, `llm-a`, `hllm-s`, `hllm-a`, `analytical-cem`, or `lewm-cem`;
 - `ah`: onboard `symb` or `lewm-cem`, paired with any runnable AG ground representation.
 
-The 20 historical cells that contain a reserved `rl` or `hrl` token remain documented
-but do not run. EventSat uses `sas`; SSA has prototype implementations of all five organisation tokens with the
+Of the historical cells, AO onboard `rl` runs; ground `rl` and hybrid `rl` pairings,
+and every cell with the reserved `hrl` token, remain documented but do not run. EventSat uses `sas`; SSA has prototype implementations of all five organisation tokens with the
 symbolic AO representation and declared constellation sizes 20 and 100; scale validation
 and CTDE world models belong to the later constellation study.
 
@@ -217,3 +220,5 @@ run identities are reported separately in [Jetson planner evidence](jetson-bench
    [paper](https://people.eecs.berkeley.edu/~brecht/l4dc2020/papers/bharadhwaj20.pdf)
 9. B. Amos and D. Yarats, “The Differentiable Cross-Entropy Method,” ICML, 2020.
    [PMLR v119](https://proceedings.mlr.press/v119/amos20a/amos20a.pdf)
+10. J. Schulman, F. Wolski, P. Dhariwal, A. Radford, and O. Klimov, “Proximal Policy
+   Optimization Algorithms,” 2017. [arXiv:1707.06347](https://arxiv.org/abs/1707.06347)

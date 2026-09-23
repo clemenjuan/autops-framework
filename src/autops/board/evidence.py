@@ -463,6 +463,9 @@ def validate_result_document(payload: Any, source: Path) -> ValidatedResult:
     preloaded = (experiment.get("mission_config") or {}).get("initial_state") or {}
     if any(float(value) != 0.0 for value in preloaded.values()):
         raise ValueError(f"{source}: preloaded initial_state results are diagnostic only")
+    uses_rl = "rl" in {experiment.get("representation"), experiment.get("onboard_representation")}
+    if uses_rl and (experiment.get("rl_policy_identity") or {}).get("source") != "checkpoint":
+        raise ValueError(f"{source}: rl results require a trained checkpoint identity")
 
     metrics = _finite_mapping(payload.get("metrics"), source, "metric")
     means = _finite_mapping(statistics.get("mean"), source, "statistics.mean")

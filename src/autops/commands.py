@@ -21,6 +21,7 @@ from autops.core.workflows import (
     evaluate_lewm_cem,
     fit_planner_artifact,
     run_sweep,
+    train_rl,
     train_world_model,
 )
 
@@ -118,7 +119,7 @@ def parser() -> argparse.ArgumentParser:
     )
     export.add_argument("--output", type=Path)
 
-    train = commands.add_parser("train", help="train LeWM or fit probes/artifact")
+    train = commands.add_parser("train", help="train LeWM or RL, or fit probes/artifact")
     training = train.add_subparsers(dest="training_command", required=True)
     wm = training.add_parser("wm", help="train the canonical LeWM checkpoint")
     wm.add_argument("trace", type=Path)
@@ -150,6 +151,17 @@ def parser() -> argparse.ArgumentParser:
     evaluate.add_argument("--max-episodes", type=int, default=5)
     evaluate.add_argument("--set", action="append", default=[])
     _audit_parsers(training)
+    rl = training.add_parser("rl", help="train the rl representation with RLlib PPO")
+    rl.add_argument("coordinate")
+    rl.add_argument("--output", type=Path, required=True)
+    rl.add_argument("--steps", type=int, help="episode length in steps")
+    rl.add_argument("--set", action="append", default=[], metavar="KEY=VALUE")
+    rl.add_argument("--recipe", type=Path, help="recipe file; defaults to configs/rl/<mission>")
+    rl.add_argument("--recipe-set", action="append", default=[], metavar="KEY=VALUE")
+    rl.add_argument("--no-orekit", action="store_true")
+    rl.add_argument("--wandb-project", default=os.environ.get("WANDB_PROJECT", "space-rl"))
+    rl.add_argument("--wandb-entity", default=os.environ.get("WANDB_ENTITY"))
+    rl.add_argument("--wandb-name", default=os.environ.get("WANDB_NAME"))
 
     board = commands.add_parser("board", help="build the unified static results board")
     board.add_argument(
@@ -239,6 +251,19 @@ def _train(args: argparse.Namespace) -> dict[str, Any]:
             mission_mode=args.mission_mode,
             max_episodes=args.max_episodes,
             overrides=parse_overrides(args.set),
+        )
+    if args.training_command == "rl":
+        return train_rl(
+            args.coordinate,
+            args.output,
+            steps=args.steps,
+            overrides=parse_overrides(args.set),
+            recipe_path=args.recipe,
+            recipe_overrides=parse_overrides(args.recipe_set),
+            prefer_orekit=not args.no_orekit,
+            wandb_project=args.wandb_project,
+            wandb_entity=args.wandb_entity,
+            wandb_name=args.wandb_name,
         )
     if args.training_command == "forecast":
         return audit_recursive_forecasts(

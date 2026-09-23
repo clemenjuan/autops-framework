@@ -34,6 +34,20 @@ def eventsat_environment(
     )
 
 
+def policy_identity(episodes: list[dict[str, Any]]) -> dict[str, Any]:
+    """The one trained policy every episode deployed; inconsistent evidence fails."""
+
+    identities = [
+        episode.get("decision_diagnostics", {}).get("onboard", {}).get("policy_identity")
+        for episode in episodes
+    ]
+    if not all(isinstance(identity, dict) for identity in identities) or any(
+        identity != identities[0] for identity in identities[1:]
+    ):
+        raise ValueError("rl result lacks one consistent policy identity")
+    return identities[0]
+
+
 @dataclass
 class ExperimentRunner:
     spec: ExperimentSpec
@@ -173,6 +187,8 @@ class ExperimentRunner:
             if any(identity != identities[0] for identity in identities[1:]):
                 raise ValueError("CEM planner episodes used inconsistent planner artifacts")
             experiment["planner_artifact_identity"] = identities[0]
+        if self.spec.onboard_token == "rl":
+            experiment["rl_policy_identity"] = policy_identity(episodes)
         result = {
             "schema_version": 1,
             "experiment": experiment,

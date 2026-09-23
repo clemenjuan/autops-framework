@@ -27,10 +27,15 @@ def test_expand_runnable_matrix_coordinate_with_paired_seeds() -> None:
     assert spec.mission_config["communications"]["sband"]["downlink_rate_kbps"] == 50
 
 
-@pytest.mark.parametrize("token", ["rl", "hrl"])
-def test_expand_rejects_reserved_deferred_representations(token: str) -> None:
+def test_expand_rejects_reserved_deferred_representations() -> None:
     with pytest.raises(ValueError, match="reserved but not implemented"):
-        expand_coordinate(f"eventsat/sas/ag/{token}")
+        expand_coordinate("eventsat/sas/ag/hrl")
+
+
+def test_rl_runs_onboard_but_not_as_a_ground_scheduler() -> None:
+    assert expand_coordinate("eventsat/sas/ao/rl").onboard_token == "rl"
+    with pytest.raises(ValueError, match="not runnable for eventsat/ag"):
+        expand_coordinate("eventsat/sas/ag/rl")
 
 
 def test_overrides_reject_unknown_top_level_and_nested_mission_keys() -> None:

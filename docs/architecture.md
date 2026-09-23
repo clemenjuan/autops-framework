@@ -148,6 +148,23 @@ one step of link capacity. Their symbolic shield admits communication with OBC d
 waiting, matching the CEM mask. Ground roles legitimately keep the pass almanac, and
 `analytical-cem` keeps it as an oracle (see below).
 
+The symbolic ground scheduler caps science production by the next pass. It sizes new
+products against that pass's deliverable capacity (`future_pass_capacity_mb`) minus data
+already staged, with at least one product per gap while capacity exceeds it. One
+compressed product (≈1.84 MB) is about one average pass (≈1.8 MB), so the baseline plans
+roughly one product per gap. The scheduler never reads the battery; the cap is what keeps
+it from over-producing, draining the battery, or duplicating products planned from the
+stale ground view. Removing the cap alone would let only the gap's time budget limit
+production (about five products per one-orbit gap).
+
+Plan B, not implemented, would size production against the remaining-episode capacity
+(`remaining_achievable_downlink_mb`) only together with two further changes: a simulated
+battery that charges first below 0.40 (to 0.55), processes only at or above 0.35, and
+observes only above 0.60 with the OBC below 80%, using `advance_projected_battery` and the
+almanac's `planning_sunlight`; and planning from fresh telemetry after a pass's first
+housekeeping downlink, which changes when AG, CG, and AH ground cores plan. Adopting it
+requires a paired AG/CG/AH-symb comparison of M-01, M-05, and M-13.
+
 Trace state rows are privileged simulator labels for probe targets and evaluation, never
 decision inputs. They include the future pass and eclipse countdowns, which are censored
 as `-1` when no later event lies within the recorded episode. Contact labels distinguish

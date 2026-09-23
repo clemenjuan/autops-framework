@@ -61,7 +61,16 @@ class EventSatSymbolic(Representation):
 
 @register("symb", mission="eventsat", role="ground")
 class EventSatSymbolicScheduler(Representation):
-    """Greedy whole-gap planner with explicit link-owned upload action."""
+    """Greedy whole-gap planner with explicit link-owned upload action.
+
+    New products are sized against the next pass's deliverable capacity minus data
+    already staged, with at least one product per gap while capacity exceeds it. One
+    compressed product is about one average pass, so this yields roughly one product
+    per gap: a conservative cap that never reads the battery yet cannot over-produce,
+    drain the battery, or duplicate products planned from the stale ground view. The
+    uncapped alternative (Plan B in docs/architecture.md) needs a battery model and
+    fresh-telemetry planning together.
+    """
 
     def __init__(self, config: dict[str, Any] | None = None) -> None:
         super().__init__(config)

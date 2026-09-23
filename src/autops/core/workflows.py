@@ -13,6 +13,7 @@ import numpy as np
 from autops.config import asset_root, expand_coordinate, load_yaml
 from autops.core.provenance import collect_provenance
 from autops.core.runner import ExperimentRunner
+from autops.core.tracking import WandbTrainingRun
 from autops.wm.artifact import (
     ModelContract,
     NormalizationContract,
@@ -32,7 +33,6 @@ from autops.wm.probes import (
 )
 from autops.wm.recipe import load_eventsat_recipe
 from autops.wm.schema import EVENTSAT_OBSERVATIONS, load_trace, trace_sha256
-from autops.wm.tracking import WandbTrainingRun
 from autops.wm.training import (
     load_checkpoint,
     save_checkpoint,

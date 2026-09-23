@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import autops.wm.tracking as tracking
+import autops.core.tracking as tracking
 
 
 class _Artifact:

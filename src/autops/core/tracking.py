@@ -1,4 +1,4 @@
-"""Required W&B tracking for command-driven world-model training."""
+"""Required W&B tracking for command-driven world-model and RL training."""
 
 from __future__ import annotations
 
@@ -9,12 +9,12 @@ from typing import Any
 
 
 def require_wandb() -> Any:
-    """Import W&B only when the world-model training workflow is invoked."""
+    """Import W&B only when a training workflow is invoked."""
 
     try:
         import wandb
-    except ImportError as exc:  # pragma: no cover - exercised without the wm extra
-        raise RuntimeError("world-model training requires W&B; install the 'wm' extra") from exc
+    except ImportError as exc:  # pragma: no cover - exercised without the wm or rl extra
+        raise RuntimeError("training requires W&B; install the 'wm' or 'rl' extra") from exc
     return wandb
 
 
@@ -34,8 +34,10 @@ class WandbTrainingRun:
         entity: str | None,
         name: str,
         config: Mapping[str, Any],
-        trace_path: str | Path,
-        trace_metadata: Mapping[str, Any],
+        trace_path: str | Path | None = None,
+        trace_metadata: Mapping[str, Any] | None = None,
+        job_type: str = "train-lewm",
+        tags: tuple[str, ...] = ("autops", "lewm"),
     ) -> WandbTrainingRun:
         selected_project = project.strip()
         if not selected_project:
@@ -45,16 +47,17 @@ class WandbTrainingRun:
             project=selected_project,
             entity=entity or None,
             name=name,
-            job_type="train-lewm",
+            job_type=job_type,
             config=dict(config),
-            tags=("autops", "lewm"),
+            tags=tags,
             settings=wandb.Settings(save_code=False),
         )
         if run is None:
             raise RuntimeError("W&B did not initialize a training run")
         tracker = cls(wandb, run, selected_project)
         try:
-            tracker._log_trace(trace_path, trace_metadata)
+            if trace_path is not None and trace_metadata is not None:
+                tracker._log_trace(trace_path, trace_metadata)
         except BaseException:
             run.finish(exit_code=1)
             raise
@@ -91,6 +94,15 @@ class WandbTrainingRun:
         self._run.log_artifact(artifact)
         for key, value in metadata.items():
             self._run.summary[key] = value
+
+    def log_model_directory(
+        self, directory: str | Path, *, name: str, metadata: Mapping[str, Any]
+    ) -> None:
+        """Log a checkpoint directory, such as an RLlib checkpoint, as a model artifact."""
+
+        artifact = self._wandb.Artifact(name=name, type="model", metadata=dict(metadata))
+        artifact.add_dir(str(Path(directory)))
+        self._run.log_artifact(artifact)
 
     def finish(self, *, exit_code: int) -> None:
         self._run.finish(exit_code=exit_code)

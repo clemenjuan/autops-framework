@@ -70,6 +70,7 @@ class RuleBasedSSA(Representation):
                     ("undelivered_record_age_steps", 0),
                     ("predicted_in_fov", []),
                     ("ground_view", {}),
+                    ("has_isl_peer", False),
                 )
             }
         return {"satellites": encoded}
@@ -82,7 +83,8 @@ class RuleBasedSSA(Representation):
         satellite_ids = sorted(satellites)
         if self.satellite_id in satellites:
             satellite_ids = [str(self.satellite_id)]
-        coordinated = len(satellite_ids) > 1
+        # A peer is coordinated when it plans for others or an ISL peer is reachable now.
+        shared_plan = len(satellite_ids) > 1
         claimed: set[str] = set()
         actions: dict[str, dict[str, str]] = {}
         rationales: list[str] = []
@@ -91,7 +93,7 @@ class RuleBasedSSA(Representation):
                 satellite_id,
                 satellites[satellite_id],
                 claimed,
-                coordinated=coordinated,
+                coordinated=shared_plan or bool(satellites[satellite_id].get("has_isl_peer")),
             )
             actions[satellite_id] = {"mode": mode}
             if mode == "payload_observe":

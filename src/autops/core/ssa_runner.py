@@ -9,7 +9,7 @@ from autops.config import ExperimentSpec, asset_root, deep_merge
 from autops.core.provenance import collect_provenance
 from autops.missions.eventsat.metrics import experiment_statistics
 from autops.missions.ssa.env import SSAEnvironment
-from autops.organisations.ssa import create_organisation
+from autops.organisations import create_organisation
 
 
 def _episode_config(spec: ExperimentSpec) -> dict[str, Any]:

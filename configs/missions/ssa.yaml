@@ -132,6 +132,9 @@ isl:
   power_overhead_w: 5.0
   unicast: true
 
+# Every organisation also accepts link_gating: physical (default) or logical.
 organisation_defaults:
+  dmas:
+    peer_view: local
   hmas:
     branching_factor: 10

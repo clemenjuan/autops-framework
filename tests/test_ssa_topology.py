@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from autops.missions.ssa.topology import build_leader_hierarchy
+from autops.organisations.topologies import build_leader_hierarchy
 
 
 def test_unary_branching_terminates_with_singleton_leaf_groups() -> None:

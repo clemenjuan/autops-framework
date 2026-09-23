@@ -84,6 +84,15 @@ def test_single_satellite_policy_never_selects_isl_relay() -> None:
     assert action == {"sat_0": {"mode": "payload_detect"}}
 
 
+def test_local_peer_relays_only_when_an_isl_peer_is_reachable() -> None:
+    stale = _satellite(undelivered_records=1, undelivered_record_age_steps=540)
+    policy = RuleBasedSSA({"custody_tau_steps": 4_320})
+    isolated = policy.select_action(_context({"sat_0": stale}))
+    reachable = policy.select_action(_context({"sat_0": {**stale, "has_isl_peer": True}}))
+    assert isolated["sat_0"]["mode"] != "isl_share"
+    assert reachable == {"sat_0": {"mode": "isl_share"}}
+
+
 def test_policy_downlinks_only_during_a_physical_pass() -> None:
     policy = RuleBasedSSA()
     no_pass = policy.select_action(_context({"sat_0": _satellite(undelivered_records=1)}))

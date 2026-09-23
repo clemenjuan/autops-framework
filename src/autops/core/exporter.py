@@ -16,7 +16,7 @@ from autops.missions.eventsat.observation import encode_vectors
 from autops.missions.eventsat.physics import MODES as EVENTSAT_MODES
 from autops.missions.ssa.env import SSAEnvironment
 from autops.missions.ssa.policy import SSA_MODES
-from autops.organisations.ssa import create_organisation
+from autops.organisations import create_organisation
 from autops.wm.schema import (
     SSA_OBSERVATIONS,
     SSA_STATES,

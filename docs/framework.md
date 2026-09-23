@@ -133,6 +133,8 @@ bandwidth-limited; coordination telemetry remains an idealized channel. The six 
 `payload_observe`, `payload_detect`, `isl_share`, and `safe`. Utility comes from fresh
 records delivered to ground, not omniscient simulator state. Organisation policies may
 change allocation and information routing, but never sensing, link, or target truth.
+DMAS peers are strictly local by default, and hosted CMAS and HMAS agents reach other
+satellites only over physical ISL links (see [architecture](architecture.md)).
 
 Both mission configurations record the manufacturer-supplied **22.9° full horizontal
 field of view at maximum sensor format**, quoted as “92.8 mm - 22.9°”. The physical

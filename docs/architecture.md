@@ -284,8 +284,31 @@ instantaneous global sensing/delivery at every active pass step, then measures f
 at the same end-of-step clock as achieved utility. It relaxes processing, pointing, and
 relay delays, so it is an optimistic bound. Organisation memories retain the information
 actually delivered to their decision loops, excluding metric-only global truth.
-Neighbour telemetry and knowledge exchange still idealize coordination traffic; a
-future bandwidth/failure study must define and validate those message costs explicitly.
+
+`autops.organisations` holds one organisation layer for every decision substrate, the
+agentic framework's contract. Each organisation declares its agents, each agent's
+actuation scope (a disjoint cover of the constellation) and largest observation scope,
+the satellite that hosts it, and optionally the logical agent graph that authorises
+inter-satellite links. The runner's decision loops and the RLlib bridge call the same
+`distribute_observation` and `collect_actions`. Under the canonical `physical` link
+gating an agent hosted on one satellite sees and commands another only over a published
+ISL pair; an unreachable satellite keeps its last received command and its staleness is
+reported. `logical` gating makes every link available, as in the agentic organisations.
+
+| Token | Agents | Commands | Sees |
+|---|---|---|---|
+| `sas` | `central_agent`, not hosted | every satellite | every satellite |
+| `imas` | `sat_agent_i` on satellite i | its satellite | its satellite |
+| `dmas` | `sat_agent_i` on satellite i | its satellite | its satellite (`peer_view: local`); with `linked`, also linked neighbours |
+| `cmas` | `mission_manager` on the first satellite | every satellite over links | satellites linked to its host |
+| `hmas` | `cluster_agent_i` on its cluster's first satellite | its cluster over links | cluster members linked to its host |
+
+Clusters are contiguous in satellite index (`branching_factor`, `num_clusters`, or an
+explicit `clusters` partition). Strictly local DMAS peers learn only through physical
+`isl_share`; each view marks `has_isl_peer` when an authorised peer is reachable, and the
+rule-based policy treats that as coordination. The `linked` view keeps the earlier
+idealised neighbour telemetry, counted as one message per neighbour and step; a future
+bandwidth/failure study must define and validate those message costs explicitly.
 
 ## Commands and runtime data
 

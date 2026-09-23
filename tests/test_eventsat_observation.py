@@ -116,6 +116,28 @@ def test_interval_feedback_is_causal_and_encoded_as_increments() -> None:
     assert _vector_value(compressing, "last_captured") == 0.0
 
 
+def test_in_progress_jobs_are_accepted_and_only_missing_products_fail() -> None:
+    env = _environment(max_steps=40)
+    env.reset(7)
+    for _ in range(env.settling_steps + 1):
+        env.step({"eventsat_0": {"mode": "payload_observe"}})
+    compress = [
+        env.step({"eventsat_0": {"mode": "payload_compress"}}).info
+        for _ in range(env.settling_steps + env.compression_steps)
+    ]
+    assert [info["action_accepted"] for info in compress if not info["in_transition"]] == [
+        True
+    ] * env.compression_steps
+    assert env.state.undetected_observations == 1
+    detect = [
+        env.step({"eventsat_0": {"mode": "payload_detect"}}).info["action_accepted"]
+        for _ in range(env.detection_steps)
+    ]
+    assert all(detect)
+    assert env.state.total_detections == 1
+    assert not env.step({"eventsat_0": {"mode": "payload_compress"}}).info["action_accepted"]
+
+
 def test_planning_charge_reaches_the_battery_but_not_the_encoded_platform_energy() -> None:
     observations = {}
     for planned in (False, True):

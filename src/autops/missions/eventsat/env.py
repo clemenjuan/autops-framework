@@ -295,17 +295,22 @@ class EventSatEnvironment:
         if mode != "payload_detect" and state.current_mode == "payload_detect":
             state.detection_progress = 0
         outcome = None
+        # A step of a multi-step job with a product to work on is accepted work;
+        # only the completing step can fail on the product's transition.
+        working = False
         if mode == "payload_observe":
             outcome = apply_observe(state.pipeline(), p)
         elif mode == "payload_compress" and state.uncompressed_observations:
             state.compression_progress += 1
-            if state.compression_progress >= self.compression_steps:
+            working = state.compression_progress < self.compression_steps
+            if not working:
                 outcome = apply_compress(state.pipeline(), p)
                 if outcome.accepted:
                     state.compression_progress = 0
         elif mode == "payload_detect" and state.undetected_observations:
             state.detection_progress += 1
-            if state.detection_progress >= self.detection_steps:
+            working = state.detection_progress < self.detection_steps
+            if not working:
                 outcome = apply_detect(state.pipeline(), p)
                 if outcome.accepted:
                     state.detection_progress = 0
@@ -322,7 +327,7 @@ class EventSatEnvironment:
                 outcome.transferred_mb if mode == "payload_send" else 0.0
             )
         result["action_accepted"] = (
-            bool(outcome.accepted) if outcome else mode in {"charging", "safe"}
+            bool(outcome.accepted) if outcome else working or mode in {"charging", "safe"}
         )
         return result
 

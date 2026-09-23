@@ -130,6 +130,8 @@ instead of appearing as ~10⁻⁵ of Jetson capacity. The OBC and compressed-Jet
 count compressed products; the total Jetson fill counts raw products over raw plus
 compressed bytes, the quantity that observation admission checks against capacity. A
 raw-only fill would duplicate the unprocessed product count and is not an input.
+A step of a multi-step compression or detection job with a product to work on is an
+accepted action; only its completing step can be rejected, by the product's transition.
 
 Values without a simulated sensor or subsystem model, such as voltages, temperatures,
 attitude quaternions, pointing error, link lock, or fault diagnoses, are not invented.

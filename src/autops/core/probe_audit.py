@@ -1,4 +1,13 @@
-"""Command workflow for Paper-C linear-versus-nonlinear probe audits."""
+"""P1 readout audit: frozen latents against controls on one episode split.
+
+Every feature family is read by the same affine and MLP heads. Heads are fitted
+on the checkpoint's training episodes, the episodes its encoder was trained on,
+and scored on its validation episodes or, given a test trace, on untouched test
+seeds. Scoring latents on encoder-training episodes would favour them over the
+controls. The controls are the raw onboard record (stack frames with
+``feature_window``), an untrained encoder of the same architecture, and elapsed
+time alone, which bounds what an episode clock can explain.
+"""
 
 from __future__ import annotations
 
@@ -7,21 +16,24 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 from autops.config import asset_root
 from autops.core.provenance import collect_provenance
 from autops.core.workflows import _latent_features
 from autops.wm.artifact import checkpoint_sha256
 from autops.wm.audit import compare_probe_heads
-from autops.wm.dataset import split_episodes
+from autops.wm.dataset import EpisodeSplit
 from autops.wm.probes import (
     DEFAULT_ATTRIBUTES,
     TARGET_DEFINITION_VERSION,
     build_eventsat_targets,
 )
-from autops.wm.schema import load_trace, trace_sha256
-from autops.wm.training import load_checkpoint
+from autops.wm.schema import TraceDataset, load_trace, trace_sha256
+from autops.wm.training import CheckpointContract, load_checkpoint
 
-AUDIT_SCHEMA_VERSION = "autops.probe-audit/v1"
+AUDIT_SCHEMA_VERSION = "autops.probe-audit/v2"
+FEATURE_FAMILIES = ("latents", "untrained", "obs", "elapsed")
 
 
 @dataclass(frozen=True)
@@ -35,62 +47,56 @@ class _AuditSettings:
     ridge: float
     learning_rate: float
     weight_decay: float
-    validation_episodes: int
 
 
-def _require_checkpoint(checkpoint_path: str | Path | None) -> str | Path:
-    if checkpoint_path is None:
-        raise ValueError("probe audit requires a LeWM checkpoint for data identity")
-    return checkpoint_path
-
-
-def _load_probe_features(trace: Any, checkpoint_path: str | Path, settings: _AuditSettings) -> Any:
-    model, checkpoint_contract = load_checkpoint(checkpoint_path, device=settings.device)
-    checkpoint_contract.validate_trace(trace)
+def _features(
+    trace: TraceDataset, model: Any, contract: CheckpointContract, settings: _AuditSettings
+) -> np.ndarray:
     if settings.features == "obs":
         return trace.obs
-    if settings.features == "latents":
-        return _latent_features(
-            model,
-            checkpoint_contract.normalizer.normalize_obs(trace.obs),
-            settings.device,
-        )
-    raise ValueError("features must be 'latents' or 'obs'")
+    if settings.features == "elapsed":
+        elapsed = np.arange(trace.n_steps, dtype=np.float32) / trace.n_steps
+        return np.broadcast_to(elapsed[None, :, None], (trace.n_episodes, trace.n_steps, 1))
+    if settings.features == "untrained":
+        from autops.wm.jepa import build_vector_jepa, require_torch
+
+        require_torch().manual_seed(settings.seed)
+        model = build_vector_jepa(contract.model_config).to(settings.device)
+    elif settings.features != "latents":
+        raise ValueError(f"features must be one of {FEATURE_FAMILIES}")
+    return _latent_features(model, contract.normalizer.normalize_obs(trace.obs), settings.device)
 
 
-def _audit_split(trace: Any, settings: _AuditSettings) -> tuple[Any, int]:
-    if settings.validation_episodes < 1:
-        raise ValueError("validation_episodes must be positive")
-    groups = len(set(trace.episode_seed.tolist()))
-    validation_count = min(settings.validation_episodes, groups - 1)
-    split = split_episodes(
-        trace.episode_seed,
-        train_fraction=(groups - validation_count) / groups,
-        seed=settings.seed,
+def _evaluation_data(
+    trace: TraceDataset,
+    test_trace: TraceDataset | None,
+    model: Any,
+    contract: CheckpointContract,
+    settings: _AuditSettings,
+) -> tuple[np.ndarray, np.ndarray, EpisodeSplit]:
+    features = _features(trace, model, contract, settings)
+    targets = build_eventsat_targets(trace)
+    if test_trace is None:
+        return features, targets, contract.episodes
+    if test_trace.metadata.mission != "eventsat" or test_trace.n_steps != trace.n_steps:
+        raise ValueError("the test trace must be EventSat with the training episode length")
+    reused = set(test_trace.episode_seed.tolist()) & set(contract.episode_seeds)
+    if reused:
+        raise ValueError(f"test seeds also occur in the training trace: {sorted(reused)}")
+    train = np.asarray(contract.episodes.train, dtype=np.int64)
+    count = len(train)
+    split = EpisodeSplit(
+        train=tuple(range(count)),
+        validation=tuple(range(count, count + test_trace.n_episodes)),
     )
-    return split, validation_count
-
-
-def _compare_heads(
-    trace: Any, probe_features: Any, audit_split: Any, settings: _AuditSettings
-) -> Any:
-    return compare_probe_heads(
-        probe_features,
-        build_eventsat_targets(trace),
-        attribute_names=DEFAULT_ATTRIBUTES,
-        feature_window=settings.feature_window,
-        hidden=settings.hidden,
-        mlp_epochs=settings.mlp_epochs,
-        episodes=audit_split,
-        ridge=settings.ridge,
-        learning_rate=settings.learning_rate,
-        weight_decay=settings.weight_decay,
-        seed=settings.seed,
-        device=settings.device,
+    return (
+        np.concatenate([features[train], _features(test_trace, model, contract, settings)]),
+        np.concatenate([targets[train], build_eventsat_targets(test_trace)]),
+        split,
     )
 
 
-def _audit_config(settings: _AuditSettings, validation_count: int) -> dict[str, Any]:
+def _audit_config(settings: _AuditSettings) -> dict[str, Any]:
     return {
         "features": settings.features,
         "feature_window": settings.feature_window,
@@ -101,39 +107,24 @@ def _audit_config(settings: _AuditSettings, validation_count: int) -> dict[str, 
         "ridge": settings.ridge,
         "learning_rate": settings.learning_rate,
         "weight_decay": settings.weight_decay,
-        "validation_episodes": validation_count,
     }
 
 
-def _audit_payload(
-    trace: Any,
-    checkpoint_path: str | Path,
-    audit_config: dict[str, Any],
-    audit: Any,
-) -> dict[str, Any]:
+def _evaluation(test_trace: TraceDataset | None) -> dict[str, Any]:
+    if test_trace is None:
+        return {"episodes": "checkpoint-validation"}
     return {
-        "schema_version": AUDIT_SCHEMA_VERSION,
-        "target_definition_version": TARGET_DEFINITION_VERSION,
-        "trace_sha256": trace_sha256(trace),
-        "checkpoint_sha256": checkpoint_sha256(checkpoint_path),
-        "checkpoint_size_bytes": Path(checkpoint_path).stat().st_size,
-        "config": audit_config,
-        "provenance": collect_provenance(audit_config, asset_root()),
-        **audit.to_dict(),
+        "episodes": "test-trace",
+        "test_trace_sha256": trace_sha256(test_trace),
+        "test_seeds": [int(seed) for seed in test_trace.episode_seed],
     }
-
-
-def _write_audit(output: str | Path, payload: dict[str, Any]) -> None:
-    destination = Path(output)
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    payload["output"] = str(destination)
 
 
 def audit_probe_decodability(
     trace_path: str | Path,
     *,
-    checkpoint_path: str | Path | None = None,
+    checkpoint_path: str | Path,
+    test_trace_path: str | Path | None = None,
     features: str = "latents",
     output: str | Path | None = None,
     feature_window: int = 1,
@@ -144,32 +135,59 @@ def audit_probe_decodability(
     ridge: float = 1e-3,
     learning_rate: float = 1e-3,
     weight_decay: float = 1e-4,
-    validation_episodes: int = 3,
 ) -> dict[str, Any]:
+    if features not in FEATURE_FAMILIES:
+        raise ValueError(f"features must be one of {FEATURE_FAMILIES}")
     settings = _AuditSettings(
-        features,
-        feature_window,
-        mlp_epochs,
-        hidden,
-        device,
-        seed,
-        ridge,
-        learning_rate,
-        weight_decay,
-        validation_episodes,
+        features=features,
+        feature_window=feature_window,
+        mlp_epochs=mlp_epochs,
+        hidden=hidden,
+        device=device,
+        seed=seed,
+        ridge=ridge,
+        learning_rate=learning_rate,
+        weight_decay=weight_decay,
     )
     trace = load_trace(trace_path)
     if trace.metadata.mission != "eventsat":
-        raise ValueError("the certification probe audit currently targets EventSat")
-    checkpoint = _require_checkpoint(checkpoint_path)
-    probe_features = _load_probe_features(trace, checkpoint, settings)
-    audit_split, validation_count = _audit_split(trace, settings)
-    audit = _compare_heads(trace, probe_features, audit_split, settings)
-    config = _audit_config(settings, validation_count)
-    payload = _audit_payload(trace, checkpoint, config, audit)
+        raise ValueError("the probe audit currently targets EventSat")
+    model, contract = load_checkpoint(checkpoint_path, device=device)
+    contract.validate_trace(trace)
+    test_trace = None if test_trace_path is None else load_trace(test_trace_path)
+    X, Y, split = _evaluation_data(trace, test_trace, model, contract, settings)
+    audit = compare_probe_heads(
+        X,
+        Y,
+        attribute_names=DEFAULT_ATTRIBUTES,
+        episodes=split,
+        feature_window=feature_window,
+        hidden=hidden,
+        mlp_epochs=mlp_epochs,
+        ridge=ridge,
+        learning_rate=learning_rate,
+        weight_decay=weight_decay,
+        seed=seed,
+        device=device,
+    )
+    config = _audit_config(settings)
+    payload = {
+        "schema_version": AUDIT_SCHEMA_VERSION,
+        "target_definition_version": TARGET_DEFINITION_VERSION,
+        "trace_sha256": trace_sha256(trace),
+        "checkpoint_sha256": checkpoint_sha256(checkpoint_path),
+        "checkpoint_size_bytes": Path(checkpoint_path).stat().st_size,
+        "evaluation": _evaluation(test_trace),
+        "config": config,
+        "provenance": collect_provenance(config, asset_root()),
+        **audit.to_dict(),
+    }
     if output is not None:
-        _write_audit(output, payload)
+        destination = Path(output)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", "utf-8")
+        payload["output"] = str(destination)
     return payload
 
 
-__all__ = ["audit_probe_decodability"]
+__all__ = ["FEATURE_FAMILIES", "audit_probe_decodability"]

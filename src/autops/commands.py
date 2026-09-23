@@ -13,7 +13,7 @@ from typing import Any
 from autops.board.generator import build_manifest_board
 from autops.config import asset_root, expand_coordinate, parse_overrides, runtime_root
 from autops.core.exporter import export_traces
-from autops.core.probe_audit import audit_probe_decodability
+from autops.core.probe_audit import FEATURE_FAMILIES, audit_probe_decodability
 from autops.core.runner import ExperimentRunner
 from autops.core.workflows import (
     evaluate_lewm_cem,
@@ -108,10 +108,11 @@ def parser() -> argparse.ArgumentParser:
     evaluate.add_argument("--mission-mode", default="science")
     evaluate.add_argument("--max-episodes", type=int, default=5)
     evaluate.add_argument("--set", action="append", default=[])
-    audit = training.add_parser("audit", help="compare linear and nonlinear frozen-feature probes")
+    audit = training.add_parser("audit", help="read frozen latents and P1 controls")
     audit.add_argument("trace", type=Path)
     audit.add_argument("--checkpoint", type=Path, required=True)
-    audit.add_argument("--features", choices=("latents", "obs"), default="latents")
+    audit.add_argument("--test-trace", type=Path)
+    audit.add_argument("--features", choices=FEATURE_FAMILIES, default="latents")
     audit.add_argument("--output", type=Path, required=True)
     audit.add_argument("--window", type=int, default=1)
     audit.add_argument("--mlp-epochs", type=int, default=100)
@@ -121,7 +122,6 @@ def parser() -> argparse.ArgumentParser:
     audit.add_argument("--ridge", type=float, default=1e-3)
     audit.add_argument("--learning-rate", type=float, default=1e-3)
     audit.add_argument("--weight-decay", type=float, default=1e-4)
-    audit.add_argument("--validation-episodes", type=int, default=3)
 
     board = commands.add_parser("board", help="build the unified static results board")
     board.add_argument(
@@ -219,6 +219,7 @@ def _train(args: argparse.Namespace) -> dict[str, Any]:
     return audit_probe_decodability(
         args.trace,
         checkpoint_path=args.checkpoint,
+        test_trace_path=args.test_trace,
         features=args.features,
         output=args.output,
         feature_window=args.window,
@@ -229,7 +230,6 @@ def _train(args: argparse.Namespace) -> dict[str, Any]:
         ridge=args.ridge,
         learning_rate=args.learning_rate,
         weight_decay=args.weight_decay,
-        validation_episodes=args.validation_episodes,
     )
 
 

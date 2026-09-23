@@ -274,7 +274,14 @@ accounting follow the deployed path. `--max-episodes` limits seed count; `--set`
 ordinary matrix overrides. These are new trajectories under the recorded mission
 configuration, not reconstructions of historical trace contexts. Evaluation v2 records
 per-episode mission metrics and actual planner diagnostics without local input paths.
-The split informed checkpoint selection and is explicitly labeled as validation. `train audit` compares linear and nonlinear frozen-feature readouts. The paper-facing
+The split informed checkpoint selection and is explicitly labeled as validation.
+`train audit` reads frozen latents and their controls (raw record, optionally stacked
+frames; an untrained encoder of the same architecture; elapsed time alone) with the same
+affine and MLP heads. Heads are fitted on the checkpoint's training episodes and scored on
+its validation episodes or, with `--test-trace`, on untouched seeds; test seeds that occur
+in the training trace are rejected. Every episode starts at the same epoch, so the
+Earth-fixed Sun vector also encodes elapsed time; the elapsed-time control bounds what such
+a clock explains. The paper-facing
 `board` reads only approved identities from the selected paper manifest (Paper B by
 default) and verifies the result ID, commit, configuration, and checkpoint hashes.
 Diagnostic entries remain preserved but excluded. Board generation fails closed on an

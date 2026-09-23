@@ -5,11 +5,14 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
-from autops.config import ExperimentSpec, asset_root, deep_merge
+from autops.config import ExperimentSpec, asset_root
 from autops.core.provenance import collect_provenance
+from autops.core.runner import policy_identity
 from autops.missions.eventsat.metrics import experiment_statistics
 from autops.missions.ssa.env import SSAEnvironment
 from autops.organisations import bind_communication_topology, create_organisation
+from autops.organisations.loops import organisation_options
+from autops.rl.policy import merge_identities
 
 
 def _episode_config(spec: ExperimentSpec) -> dict[str, Any]:
@@ -20,10 +23,16 @@ def _episode_config(spec: ExperimentSpec) -> dict[str, Any]:
     return config
 
 
+def ssa_environment(spec: ExperimentSpec) -> SSAEnvironment:
+    """The SSA truth environment of a coordinate; countdowns are published to RL only."""
+
+    return SSAEnvironment(_episode_config(spec), event_countdowns=spec.onboard_token == "rl")
+
+
 def _organisation_config(spec: ExperimentSpec) -> dict[str, Any]:
-    defaults = spec.mission_config.get("organisation_defaults", {}).get(spec.organisation, {})
-    config = deep_merge(defaults, spec.organisation_config)
-    policy = dict(config.get("policy", {}))
+    config = organisation_options(spec)
+    # Representation overrides reach every agent's plugin, as on the EventSat runner.
+    policy = {**config.get("policy", {}), **spec.representation_config}
     custody = spec.mission_config.get("ssa", {}).get("custody_tau_steps", 4320)
     relay = spec.mission_config.get("ssa", {}).get("relay_preemption_age_steps", custody // 8)
     policy.setdefault("custody_tau_steps", custody)
@@ -34,7 +43,7 @@ def _organisation_config(spec: ExperimentSpec) -> dict[str, Any]:
 
 
 def _run_episode(spec: ExperimentSpec, episode_id: int, seed: int) -> dict[str, Any]:
-    env = SSAEnvironment(_episode_config(spec))
+    env = ssa_environment(spec)
     controller = create_organisation(spec.organisation, _organisation_config(spec))
     observation = env.reset(seed)
     controller.reset(seed, observation)
@@ -49,8 +58,23 @@ def _run_episode(spec: ExperimentSpec, episode_id: int, seed: int) -> dict[str, 
         if transition.done:
             break
     metrics = {**env.episode_metrics(), **controller.metrics()}
+    diagnostics = (
+        {
+            "onboard": {
+                "policy_identity": merge_identities(
+                    [
+                        policy.diagnostics()["policy_identity"]
+                        for policy in controller.policies.values()
+                    ]
+                )
+            }
+        }
+        if spec.onboard_token == "rl"
+        else {}
+    )
     return {
         "episode_id": episode_id,
+        "decision_diagnostics": diagnostics,
         "seed": seed,
         "steps": int(observation["step"]),
         "total_reward": total_reward,
@@ -71,9 +95,12 @@ def run_ssa_experiment(spec: ExperimentSpec) -> dict[str, Any]:
         [episode["metrics"] for episode in episodes], include_robustness=False
     )
     mean_metrics = statistics["mean"]
+    experiment = spec.model_dump(mode="json")
+    if spec.onboard_token == "rl":
+        experiment["rl_policy_identity"] = policy_identity(episodes)
     return {
         "schema_version": 1,
-        "experiment": spec.model_dump(mode="json"),
+        "experiment": experiment,
         "metric_registry": {name: name for name in sorted(mean_metrics)},
         "metrics": mean_metrics,
         "statistics": statistics,
@@ -82,4 +109,4 @@ def run_ssa_experiment(spec: ExperimentSpec) -> dict[str, Any]:
     }
 
 
-__all__ = ["run_ssa_experiment"]
+__all__ = ["run_ssa_experiment", "ssa_environment"]

@@ -1,0 +1,42 @@
+# PPO recipe for the SSA onboard `rl` representation, from the agentic framework's
+# multi-satellite SSA configurations (Schulman et al. 2017, arXiv:1707.06347). Those
+# configurations were validated as a pipeline only; no SSA policy was trained there.
+# Override keys for a run with `autops train rl ... --recipe-set key=value`.
+
+seed: 42
+timesteps: 10000000
+max_iterations: 100000
+checkpoint_every_timesteps: 0
+
+num_env_runners: 4
+num_gpus: 1
+rollout_fragment: 128
+train_batch_size: 4096
+minibatch_size: 256
+
+lr: 0.0001
+lr_schedule: [[0, 0.0001], [10000000, 0.0001]]
+gamma: 0.97
+gae_lambda: 0.95
+clip_ratio: 0.3
+ppo_epochs: 30
+entropy_coef: 0.01
+value_coef: 1.0
+max_grad_norm: 0.5
+
+hidden_size: 256
+# Agents sharing a policy need identical spaces; HMAS clusters of unequal size need
+# independent_per_agent.
+policy_sharing: shared_all
+
+# Per-satellite reward: local_weight * own penalties + team_weight * team(penalties),
+# plus the shared custody term once per satellite (mean, sum, or min team reducer).
+reward:
+  local_weight: 0.7
+  team_weight: 0.3
+  team_reducer: mean
+
+pipeline_shaping:
+  enabled: false
+  potential: delivery
+  scale: 1.0

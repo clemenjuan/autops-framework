@@ -7,6 +7,7 @@ from dataclasses import replace
 from typing import Any
 
 from autops.core.types import EnvironmentStep
+from autops.missions.ssa.almanac import event_countdowns
 from autops.missions.ssa.dynamics import (
     apply_power,
     collective_reward,
@@ -44,8 +45,12 @@ from autops.missions.ssa.transport import (
 class SSAEnvironment:
     """Constellation sensing, onboard detection, record relay, and ground custody."""
 
-    def __init__(self, config: dict[str, Any] | None = None) -> None:
+    def __init__(
+        self, config: dict[str, Any] | None = None, *, event_countdowns: bool = False
+    ) -> None:
         self.config = merge_config(config)
+        # Pass and eclipse countdowns are published only for RL representations.
+        self.publish_countdowns = event_countdowns
         simulation = self.config["simulation"]
         constellation = self.config["constellation"]
         self.timestep_s = float(simulation["timestep_s"])
@@ -53,6 +58,15 @@ class SSAEnvironment:
         self.constellation_size = int(constellation["size"])
         self.satellite_ids = [f"sat_{index}" for index in range(self.constellation_size)]
         self.custody_tau_steps = max(0, int(self.config["ssa"]["custody_tau_steps"]))
+        self.orbital_period_steps = max(
+            1, round(float(self.config["orbit"]["orbital_period_s"]) / self.timestep_s)
+        )
+        fixed_targets = self.config["targets"]["fixed_positions_km"]
+        # The declared catalog, before the episode's privileged support cut.
+        self.catalog_size = (
+            len(fixed_targets) if fixed_targets else int(self.config["targets"]["count"])
+        )
+        self._countdowns: dict[str, dict[str, list[int]]] = {}
         self.record_size_bytes = float(self.config["ssa"]["record_size_kb"]) * 1024.0
         self.link_budget = LinkBudget.from_mapping(self.config["isl"])
         self._position_provider: Callable[[str, float], tuple[float, float, float]] | None = None
@@ -100,6 +114,7 @@ class SSAEnvironment:
             self.custody_tau_steps,
             self.max_steps,
         )
+        self._countdowns = event_countdowns(self, pass_windows) if self.publish_countdowns else {}
         return self.observe()
 
     def observe(self) -> dict[str, Any]:
@@ -152,6 +167,15 @@ class SSAEnvironment:
                     max(0, self.current_step - oldest) if oldest is not None else 0
                 ),
                 "predicted_in_fov": predicted,
+                "detection_progress": min(
+                    1.0,
+                    runtime.detection_progress_s
+                    / max(float(self.config["payload"]["detection_time_s"]), 1e-12),
+                ),
+                "catalog_size": self.catalog_size,
+                "custody_tau_steps": self.custody_tau_steps,
+                "orbital_period_steps": self.orbital_period_steps,
+                **self._countdowns_at(satellite_id),
                 "ground_view": {
                     object_id: max(0, self.current_step - observed_step)
                     for object_id, observed_step in sorted(runtime.ground_catalog_steps.items())
@@ -260,6 +284,14 @@ class SSAEnvironment:
             object_id
             for object_id, observed_step in self._freshest_ground_steps().items()
             if self.current_step - observed_step <= self.custody_tau_steps
+        }
+
+    def _countdowns_at(self, satellite_id: str) -> dict[str, int]:
+        if not self._countdowns or self.current_step >= self.max_steps:
+            return {}
+        return {
+            name: values[self.current_step]
+            for name, values in self._countdowns[satellite_id].items()
         }
 
     def configure_communication_links(self, links: set[tuple[str, str]] | None) -> None:

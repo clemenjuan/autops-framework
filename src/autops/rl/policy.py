@@ -72,6 +72,18 @@ def checkpoint_identity(directory: Path, manifest: Mapping[str, Any], policy_id:
     }
 
 
+def merge_identities(identities: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """One run-level identity: agents may use several policies of a single checkpoint."""
+
+    shared = [
+        {key: value for key, value in item.items() if key != "policy_id"} for item in identities
+    ]
+    if not shared or any(item != shared[0] for item in shared[1:]):
+        raise ValueError("organisation agents deployed different RL checkpoints")
+    policy_ids = sorted({str(item["policy_id"]) for item in identities if "policy_id" in item})
+    return {**shared[0], **({"policy_ids": policy_ids} if policy_ids else {})}
+
+
 class RLlibPolicy:
     """One trained RLlib policy with deterministic or privately seeded sampling."""
 
@@ -142,6 +154,7 @@ __all__ = [
     "RLlibPolicy",
     "RandomPolicy",
     "checkpoint_identity",
+    "merge_identities",
     "read_manifest",
     "validate_manifest",
 ]

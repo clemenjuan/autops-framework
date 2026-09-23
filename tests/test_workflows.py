@@ -49,7 +49,7 @@ def test_eventsat_declared_design_extends_historical_32_to_43_cells() -> None:
 
 
 def test_matrix_sweep_filters_and_fails_when_empty() -> None:
-    assert matrix_coordinates("ssa", organisation="imas") == ["ssa/imas/ao/symb"]
+    assert matrix_coordinates("ssa", organisation="imas") == ["ssa/imas/ao/symb", "ssa/imas/ao/rl"]
     with pytest.raises(ValueError, match="no runnable"):
         matrix_coordinates("ssa", representation="llm-s")
 

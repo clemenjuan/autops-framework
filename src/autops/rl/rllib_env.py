@@ -20,8 +20,11 @@ from ray.rllib.env.multi_agent_env import MultiAgentEnv
 
 from autops.config import ExperimentSpec
 from autops.core.runner import eventsat_environment
+from autops.core.ssa_runner import ssa_environment
+from autops.missions.ssa.rewards import SSARewardFunction
 from autops.organisations import AgentAction, bind_communication_topology
 from autops.organisations.base import validate_agent_satellite_mapping
+from autops.organisations.loops import organisation_options
 from autops.organisations.topologies import ORGANISATIONS
 from autops.rl.diagnostics import accumulate, empty_diagnostics
 from autops.rl.shaping import PipelineShaping, pipeline_state
@@ -29,13 +32,6 @@ from autops.rl.spaces import RLSpaceAdapter, make_space_adapter
 
 TRAINING_SEED_FLOOR = 1_000_000
 SUPPORTED_PARADIGMS = frozenset({"ao"})
-
-
-def organisation_config(spec: ExperimentSpec) -> dict[str, Any]:
-    """Organisation options from the mission defaults and the coordinate overrides."""
-
-    defaults = spec.mission_config.get("organisation_defaults", {}).get(spec.organisation, {})
-    return {**defaults, **spec.organisation_config}
 
 
 class AUTOPSRLLibMultiAgentEnv(MultiAgentEnv):
@@ -52,7 +48,7 @@ class AUTOPSRLLibMultiAgentEnv(MultiAgentEnv):
             )
         recipe = dict(config.get("recipe", {}))
         self._environment = _mission_environment(self.spec, bool(config.get("prefer_orekit", True)))
-        self._organisation = ORGANISATIONS[self.spec.organisation](organisation_config(self.spec))
+        self._organisation = ORGANISATIONS[self.spec.organisation](organisation_options(self.spec))
         self._organisation.initialize(_satellite_ids(self._environment))
         validate_agent_satellite_mapping(self._organisation)
         self.possible_agents = self._organisation.get_agents()
@@ -83,6 +79,7 @@ class AUTOPSRLLibMultiAgentEnv(MultiAgentEnv):
             if shaping.get("enabled", False)
             else None
         )
+        self._ssa_reward = SSARewardFunction(recipe.get("reward"))
         self._seed_rng = np.random.default_rng(TRAINING_SEED_FLOOR)
         self._observation: dict[str, Any] = {}
         self._diagnostics: dict[str, float] = {}
@@ -154,6 +151,10 @@ class AUTOPSRLLibMultiAgentEnv(MultiAgentEnv):
         """Per-satellite mission reward, plus optional shaping for training only."""
 
         environment = self._environment
+        if self.spec.mission == "ssa":
+            return self._ssa_reward.satellite_rewards(
+                environment, result.info["resolved_modes"], result.info["per_satellite"]
+            )
         reward = float(result.reward)
         if before is not None and self._shaping is not None:
             reward += environment.reward_function.reward_scale * self._shaping.reward(
@@ -169,16 +170,18 @@ class AUTOPSRLLibMultiAgentEnv(MultiAgentEnv):
 def _mission_environment(spec: ExperimentSpec, prefer_orekit: bool) -> Any:
     if spec.mission == "eventsat":
         return eventsat_environment(spec, prefer_orekit=prefer_orekit)
+    if spec.mission == "ssa":
+        return ssa_environment(spec)
     raise ValueError(f"no RL environment for mission {spec.mission!r}")
 
 
 def _satellite_ids(environment: Any) -> list[str]:
-    return list(getattr(environment, "satellite_ids", [environment.satellite_id]))
+    ids = getattr(environment, "satellite_ids", None)
+    return list(ids) if ids is not None else [environment.satellite_id]
 
 
 __all__ = [
     "SUPPORTED_PARADIGMS",
     "TRAINING_SEED_FLOOR",
     "AUTOPSRLLibMultiAgentEnv",
-    "organisation_config",
 ]

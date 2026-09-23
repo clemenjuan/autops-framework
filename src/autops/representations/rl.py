@@ -109,4 +109,11 @@ class EventSatRL(RLPolicy):
     default_satellites = ("eventsat_0",)
 
 
-__all__ = ["EventSatRL", "RLPolicy"]
+@register("rl", mission="ssa", role="onboard")
+class SSARL(RLPolicy):
+    """PPO modes for one organisation agent's SSA satellites, from its scoped view."""
+
+    mission = "ssa"
+
+
+__all__ = ["SSARL", "EventSatRL", "RLPolicy"]

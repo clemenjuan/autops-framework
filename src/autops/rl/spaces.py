@@ -17,6 +17,8 @@ from typing import Any
 import numpy as np
 
 from autops.missions.eventsat.observation import encode_vectors, observation_space
+from autops.missions.ssa.observation import SSA_RL_OBSERVATIONS, ssa_rl_vector
+from autops.missions.ssa.policy import SSA_MODES
 from autops.organisations.base import AgentObservation
 from autops.wm.schema import EVENTSAT_ACTIONS, EVENTSAT_OBSERVATIONS
 
@@ -42,7 +44,14 @@ EVENTSAT_RL_SPEC = RLSpec(
     # The onboard vector of trace v4; RL shares the world model's information boundary.
     "autops.eventsat.onboard-observation/v4",
 )
-RL_SPECS: dict[str, RLSpec] = {"eventsat": EVENTSAT_RL_SPEC}
+SSA_RL_SPEC = RLSpec(
+    "ssa",
+    SSA_MODES,
+    SSA_RL_OBSERVATIONS,
+    # Agentic ssa_local_compact order on the lean SSA environment, plus WM custody inputs.
+    "autops.ssa.local-observation/v1",
+)
+RL_SPECS: dict[str, RLSpec] = {"eventsat": EVENTSAT_RL_SPEC, "ssa": SSA_RL_SPEC}
 
 
 def rl_spec(mission: str) -> RLSpec:
@@ -66,6 +75,45 @@ def ground_eventsat_mode(
     if battery_soc < battery_min_soc and mode != "charging":
         return "charging"
     return mode
+
+
+def ground_ssa_mode(
+    mode: str,
+    satellite: Mapping[str, Any],
+    *,
+    coordinated: bool,
+    low_soc: float = 0.3,
+    observe_soc: float = 0.6,
+    storage_high: float = 0.7,
+) -> str:
+    """Controller-visible SSA shield of the agentic framework, on lean SSA telemetry.
+
+    Communication needs a pass and records, observation needs battery and room for a
+    batch, detection needs a pending batch, and ISL sharing needs something useful to
+    share, a coordinated scope or reachable peer, and battery.
+    """
+
+    if satellite.get("health", "nominal") != "nominal":
+        return "safe"
+    soc = float(satellite.get("battery_soc", 0.5))
+    if soc < low_soc and mode != "charging":
+        return "charging"
+    undelivered = int(satellite.get("undelivered_records", 0))
+    admitted = {
+        "communication": bool(satellite.get("ground_pass_active")) and undelivered > 0,
+        "payload_observe": soc > observe_soc
+        and float(satellite.get("storage_used_fraction", 0.0)) < storage_high
+        and float(satellite.get("jetson_raw_mb", 0.0))
+        + float(satellite.get("observation_size_mb", 0.0))
+        <= float(satellite.get("jetson_capacity_mb", 0.0)),
+        "payload_detect": int(satellite.get("unprocessed_batches", 0)) > 0,
+        "isl_share": (undelivered > 0 or bool(satellite.get("known_objects")))
+        and (coordinated or bool(satellite.get("has_isl_peer")))
+        and soc > observe_soc,
+    }
+    if mode not in SSA_MODES:
+        return "charging"
+    return mode if admitted.get(mode, True) else "charging"
 
 
 def scoped_record(observation: Any) -> Mapping[str, Any]:
@@ -180,7 +228,45 @@ class EventSatSpaceAdapter(RLSpaceAdapter):
         return grounded
 
 
-ADAPTERS: dict[str, type[RLSpaceAdapter]] = {"eventsat": EventSatSpaceAdapter}
+class SSASpaceAdapter(RLSpaceAdapter):
+    """Local SSA vector per observed satellite and one six-mode head per command."""
+
+    spec = SSA_RL_SPEC
+
+    def observation_bounds(
+        self, mission_config: Mapping[str, Any]
+    ) -> tuple[np.ndarray, np.ndarray]:
+        del mission_config
+        size = self.spec.obs_dim * max(1, len(self.observe_ids))
+        return np.zeros(size, np.float32), np.ones(size, np.float32)
+
+    def encode_observation(self, observation: Any) -> np.ndarray:
+        record = scoped_record(observation)
+        parts = [ssa_rl_vector(record, satellite_id) for satellite_id in self.observe_ids]
+        return np.concatenate(parts).astype(np.float32) if parts else np.zeros(1, np.float32)
+
+    def ground_decoded_action(
+        self, action: dict[str, dict[str, Any]], observation: Any
+    ) -> dict[str, dict[str, Any]]:
+        satellites = scoped_record(observation).get("satellites", {})
+        coordinated = len(self.act_ids) > 1
+        return {
+            satellite_id: {
+                **command,
+                "mode": ground_ssa_mode(
+                    str(command["mode"]), satellites[satellite_id], coordinated=coordinated
+                ),
+            }
+            if satellite_id in satellites
+            else dict(command)
+            for satellite_id, command in action.items()
+        }
+
+
+ADAPTERS: dict[str, type[RLSpaceAdapter]] = {
+    "eventsat": EventSatSpaceAdapter,
+    "ssa": SSASpaceAdapter,
+}
 
 
 def make_space_adapter(
@@ -197,11 +283,14 @@ def make_space_adapter(
 __all__ = [
     "EVENTSAT_RL_SPEC",
     "RL_SPECS",
+    "SSA_RL_SPEC",
     "EventSatSpaceAdapter",
     "RLSpaceAdapter",
     "RLSpec",
+    "SSASpaceAdapter",
     "eventsat_vector",
     "ground_eventsat_mode",
+    "ground_ssa_mode",
     "make_space_adapter",
     "rl_spec",
     "scoped_record",

@@ -11,10 +11,10 @@ import numpy as np
 from autops.config import ExperimentSpec, asset_root, runtime_root
 from autops.core.provenance import collect_provenance
 from autops.core.runner import ExperimentRunner
-from autops.core.ssa_runner import _episode_config, _organisation_config
+from autops.core.ssa_runner import _organisation_config, ssa_environment
 from autops.missions.eventsat.observation import encode_vectors
 from autops.missions.eventsat.physics import MODES as EVENTSAT_MODES
-from autops.missions.ssa.env import SSAEnvironment
+from autops.missions.ssa.observation import encode_ssa_vectors
 from autops.missions.ssa.policy import SSA_MODES
 from autops.organisations import bind_communication_topology, create_organisation
 from autops.wm.schema import (
@@ -99,67 +99,12 @@ def _eventsat_trace(spec: ExperimentSpec, prefer_orekit: bool) -> TraceDataset:
     return _assemble(metadata, episode_rows, spec.seeds)
 
 
-def _ssa_vectors(
-    observation: dict[str, Any],
-    satellite_id: str,
-    custody_tau_steps: int,
-) -> tuple[np.ndarray, np.ndarray]:
-    satellite = observation["satellites"][satellite_id]
-    global_state = observation["global"]
-    target_count = max(1, int(global_state.get("ssa_catalog_size", 0)))
-    max_steps = max(1, int(global_state.get("max_steps", 1)))
-    mode = str(satellite.get("mode", "charging"))
-    observation_vector = np.zeros(len(SSA_OBSERVATIONS), dtype=np.float32)
-    observation_vector[:12] = (
-        float(satellite.get("battery_soc", 0.0)),
-        float(satellite.get("storage_used_fraction", 0.0)),
-        float(bool(satellite.get("ground_pass_active", False))),
-        min(1.0, float(satellite.get("contact_seconds", 0.0)) / 60.0),
-        float(bool(satellite.get("in_sunlight", False))),
-        float(satellite.get("health", "nominal") == "nominal"),
-        min(1.0, float(satellite.get("unprocessed_batches", 0)) / 10.0),
-        min(1.0, float(satellite.get("undelivered_records", 0)) / target_count),
-        min(
-            1.0,
-            float(satellite.get("undelivered_record_age_steps", 0)) / max(1, custody_tau_steps),
-        ),
-        min(1.0, len(satellite.get("known_objects", [])) / target_count),
-        min(1.0, len(satellite.get("ground_view", {})) / target_count),
-        min(1.0, len(satellite.get("predicted_in_fov", [])) / target_count),
-    )
-    observation_vector[12 + (SSA_MODES.index(mode) if mode in SSA_MODES else 0)] = 1.0
-    state_vector = np.asarray(
-        [
-            satellite.get("battery_soc", 0.0),
-            SSA_MODES.index(mode) if mode in SSA_MODES else 0,
-            float(bool(satellite.get("ground_pass_active", False))),
-            satellite.get("contact_seconds", 0.0),
-            float(bool(satellite.get("in_sunlight", False))),
-            float(satellite.get("health", "nominal") == "nominal"),
-            satellite.get("jetson_raw_mb", 0.0),
-            satellite.get("jetson_capacity_mb", 0.0),
-            satellite.get("unprocessed_batches", 0),
-            satellite.get("undelivered_records", 0),
-            satellite.get("undelivered_record_age_steps", 0),
-            len(satellite.get("known_objects", [])),
-            len(satellite.get("ground_view", {})),
-            len(satellite.get("predicted_in_fov", [])),
-            sum(int(value) for value in satellite.get("detection_row", [])),
-            target_count,
-            float(observation.get("step", 0)) / max_steps,
-            custody_tau_steps,
-        ],
-        dtype=np.float32,
-    )
-    return observation_vector, state_vector
-
-
 def _ssa_trace(spec: ExperimentSpec) -> TraceDataset:
     episode_rows: list[dict[str, list[Any]]] = []
     satellite_ids = tuple(f"sat_{index}" for index in range(spec.constellation_size))
     custody_tau = int(spec.mission_config.get("ssa", {}).get("custody_tau_steps", 4320))
     for seed in spec.seeds:
-        env = SSAEnvironment(_episode_config(spec))
+        env = ssa_environment(spec)
         controller = create_organisation(spec.organisation, _organisation_config(spec))
         observation = env.reset(seed)
         controller.reset(seed, observation)
@@ -181,7 +126,7 @@ def _ssa_trace(spec: ExperimentSpec) -> TraceDataset:
         }
         while int(observation["step"]) < spec.steps:
             vectors = [
-                _ssa_vectors(observation, satellite_id, custody_tau)
+                encode_ssa_vectors(observation, satellite_id, custody_tau)
                 for satellite_id in satellite_ids
             ]
             actions = controller.act(observation)

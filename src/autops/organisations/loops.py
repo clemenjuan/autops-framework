@@ -10,6 +10,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
+from autops.config import ExperimentSpec, deep_merge
 from autops.core.plugin import Representation, create_representation
 from autops.core.types import DecisionContext
 from autops.memory.fixed import FixedMemory
@@ -86,6 +87,7 @@ class DecisionLoops:
         if agent_id not in self.policies:
             config = {
                 **self.policy_config,
+                "agent_id": agent_id,
                 "act_ids": self.organisation.satellites_for_agent(agent_id),
                 "observe_ids": self.organisation.observed_satellites_for_agent(agent_id),
             }
@@ -94,6 +96,13 @@ class DecisionLoops:
             self.policies[agent_id] = policy
             self.memories[agent_id] = FixedMemory()
         return self.policies[agent_id]
+
+
+def organisation_options(spec: ExperimentSpec) -> dict[str, Any]:
+    """The coordinate's organisation options: mission defaults under its overrides."""
+
+    defaults = spec.mission_config.get("organisation_defaults", {}).get(spec.organisation, {})
+    return deep_merge(defaults, spec.organisation_config)
 
 
 def create_organisation(
@@ -115,4 +124,4 @@ def create_organisation(
     )
 
 
-__all__ = ["DecisionLoops", "create_organisation"]
+__all__ = ["DecisionLoops", "create_organisation", "organisation_options"]

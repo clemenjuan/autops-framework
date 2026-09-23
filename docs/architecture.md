@@ -330,6 +330,13 @@ canonical environment. The runner deploys the same adapter and shield, and a par
 test drives both paths with identical actions. Training episodes draw launch seeds from
 10^6 upwards, keeping the small paired evaluation seeds unseen. The reward is the
 mission's; optional potential-based pipeline shaping is added only inside the bridge.
+SSA agents follow the organisation layer: SAS and CMAS agents command every satellite,
+HMAS agents their cluster, and IMAS and DMAS agents their own satellite, each observing a
+fixed scope in which a satellite hidden by the channel encodes as zeros. The SSA
+environment publishes pass and eclipse countdowns only for `rl` coordinates, and
+declares the catalog size, custody tau, and orbital period in every record so each view
+carries its own normalisation. Agents sharing a policy must have identical spaces;
+unequal HMAS clusters use `policy_sharing: independent_per_agent`.
 Every checkpoint, including intermediate `step_<sampled steps>` snapshots, carries a
 manifest with the observation schema and names, per-policy spaces, recipe, and
 public-safe provenance; loading rejects any other contract, and results record the

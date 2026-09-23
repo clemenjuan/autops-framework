@@ -129,20 +129,25 @@ def apply_power(
         )
 
 
+def custody_mission_term(env: SSAEnvironment) -> float:
+    """Shared custody term: the weighted uncovered (or covered) fraction of the catalog."""
+
+    reward_config = env.config["ssa"]
+    target_count = len(env.target_ids)
+    custody_fraction = len(env.custody_object_ids) / target_count if target_count else 0.0
+    weight = float(reward_config["collective_weight"])
+    if bool(reward_config["collective_negative"]):
+        return -weight * (1.0 - custody_fraction)
+    return weight * custody_fraction
+
+
 def collective_reward(
     env: SSAEnvironment,
     modes: dict[str, str],
     per_satellite: dict[str, dict[str, Any]],
 ) -> float:
     reward_config = env.config["ssa"]
-    target_count = len(env.target_ids)
-    custody_fraction = len(env.custody_object_ids) / target_count if target_count else 0.0
-    mission_scale = float(reward_config["collective_weight"])
-    mission = (
-        -mission_scale * (1.0 - custody_fraction)
-        if bool(reward_config["collective_negative"])
-        else mission_scale * custody_fraction
-    )
+    mission = custody_mission_term(env)
     denominator = max(1, len(modes))
     failures = sum(bool(info.get("failure_reason")) for info in per_satellite.values())
     safe_steps = sum(mode == "safe" for mode in modes.values())

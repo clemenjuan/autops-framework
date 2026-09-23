@@ -29,7 +29,7 @@ def test_board_defaults_to_paper_b_mission_results() -> None:
 def test_sweep_dry_run_prints_real_coordinates(capsys) -> None:
     assert main(["sweep", "ssa", "--organisation", "imas", "--dry-run"]) == 0
     payload = json.loads(capsys.readouterr().out)
-    assert payload["coordinates"] == ["ssa/imas/ao/symb"]
+    assert payload["coordinates"] == ["ssa/imas/ao/symb", "ssa/imas/ao/rl"]
     assert payload["completed"] == 0
 
 

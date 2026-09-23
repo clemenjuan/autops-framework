@@ -91,7 +91,7 @@ The declared study total is therefore `32 + 4 + 2 + 5 = 43`. The executable subs
 
 Of the historical cells, AO onboard `rl` runs; ground `rl` and hybrid `rl` pairings,
 and every cell with the reserved `hrl` token, remain documented but do not run. EventSat uses `sas`; SSA has prototype implementations of all five organisation tokens with the
-symbolic AO representation and declared constellation sizes 20 and 100; scale validation
+symbolic and `rl` AO representations and declared constellation sizes 20 and 100; scale validation
 and CTDE world models belong to the later constellation study.
 
 Coordinates are expanded at runtime from `configs/matrix.yaml` and one mission file:
@@ -138,6 +138,15 @@ records delivered to ground, not omniscient simulator state. Organisation polici
 change allocation and information routing, but never sensing, link, or target truth.
 DMAS peers are strictly local by default, and hosted CMAS and HMAS agents reach other
 satellites only over physical ISL links (see [architecture](architecture.md)).
+SSA runs `rl` under every organisation: one RLlib agent per organisation agent, each
+commanding its satellites from its scoped view with a local vector per satellite. That
+vector keeps the agentic framework's feature order on the lean SSA telemetry, adds the
+world model's record age and ground-view fraction, and, unlike the SSA symbolic policy
+and world model, includes the pass and eclipse countdowns; SSA `rl` results therefore
+carry forecast information the other SSA representations do not have, and must be
+reported as such. Each satellite's reward blends its own failed-action and safe-mode
+penalties with a team term and adds the shared custody term once; the environment's
+reward and metrics are unchanged.
 SSA shares EventSat's attitude rule: a slew keeps its initial target, commands while
 settling are ignored, and only environment-enforced safe mode preempts it. A
 communication attempt without contact, or with nothing to deliver, is a failed action.

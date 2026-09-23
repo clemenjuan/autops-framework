@@ -259,6 +259,16 @@ class EventSatCEMBase(Representation):
             rationale=f"{self.token} planning event score={result.score:.6g}",
         )
 
+    def score_requested(
+        self, state: Mapping[str, Any], history: Mapping[str, Any], requested: np.ndarray
+    ) -> np.ndarray:
+        """Score a requested candidate bank exactly as one planning event would."""
+
+        projection = self._project_executable(state, requested)
+        return self._score_candidates(
+            {**history, "state": dict(state)}, projection.sequences, projection
+        )
+
     def _proposal_probabilities(self) -> np.ndarray:
         """Return the canonical cold prior or the shifted plan-hold warm start."""
 

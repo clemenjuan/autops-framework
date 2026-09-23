@@ -8,53 +8,20 @@ from autops.core.exporter import export_trace
 from autops.core.probe_audit import FEATURE_FAMILIES, audit_probe_decodability
 from autops.core.workflows import fit_planner_artifact
 from autops.wm.artifact import checkpoint_sha256, load_artifact
-from autops.wm.jepa import LeWMConfig
-from autops.wm.schema import EVENTSAT_OBSERVATIONS, load_trace, write_trace
-from autops.wm.training import (
-    TrainingConfig,
-    load_checkpoint,
-    save_checkpoint,
-    train_lewm,
-)
-
-OBS_DIM = len(EVENTSAT_OBSERVATIONS)
+from autops.wm.schema import load_trace, write_trace
+from autops.wm.training import load_checkpoint, save_checkpoint
 
 
-def test_artifact_and_latent_audit_reuse_exact_checkpoint_data_contract(tmp_path) -> None:
-    pytest.importorskip("torch")
+def test_artifact_and_latent_audit_reuse_exact_checkpoint_data_contract(
+    tmp_path, tiny_lewm
+) -> None:
     trace_path = export_trace(
         expand_coordinate("eventsat/sas/ao/symb", episodes=4, steps=6, seeds=[3, 4, 5, 6]),
         tmp_path / "trace.npz",
         prefer_orekit=False,
     )
     trace = load_trace(trace_path)
-    result = train_lewm(
-        trace,
-        model_config=LeWMConfig(
-            obs_dim=OBS_DIM,
-            action_dim=7,
-            embed_dim=8,
-            encoder_hidden_dim=8,
-            predictor_depth=1,
-            predictor_heads=1,
-            predictor_head_dim=8,
-            predictor_mlp_dim=16,
-            projector_hidden_dim=16,
-            dropout=0.0,
-            sigreg_knots=3,
-            sigreg_projections=4,
-        ),
-        training_config=TrainingConfig(
-            max_steps=1,
-            warmup_steps=0,
-            batch_size=2,
-            train_fraction=0.5,
-            seed=17,
-            validation_interval=1,
-            validation_sample_size=4,
-            train_loss_window=1,
-        ),
-    )
+    result = tiny_lewm(trace)
     checkpoint_path = save_checkpoint(tmp_path / "model.pt", result)
     _, contract = load_checkpoint(checkpoint_path)
 

@@ -282,7 +282,12 @@ affine and MLP heads. Heads are fitted on the checkpoint's training episodes and
 its validation episodes or, with `--test-trace`, on untouched seeds; test seeds that occur
 in the training trace are rejected. Every episode starts at the same epoch, so the
 Earth-fixed Sun vector also encodes elapsed time; the elapsed-time control bounds what such
-a clock explains. The paper-facing
+a clock explains. `train selection` replays logged episodes from their launch seeds, whose
+records must re-encode to the logged observations exactly, and at sampled decision points
+scores one bank of requested command sequences with the deployed learned planner and the
+analytical oracle, each under its own information. It reports top-elite overlap, oracle
+regret, and best-candidate rate against a random-scorer chance level, overall and split by
+proximity to contact. The paper-facing
 `board` reads only approved identities from the selected paper manifest (Paper B by
 default) and verifies the result ID, commit, configuration, and checkpoint hashes.
 Diagnostic entries remain preserved but excluded. Board generation fails closed on an

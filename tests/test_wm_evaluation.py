@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import json
 import shutil
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -20,16 +22,14 @@ from autops.wm.artifact import (
     save_artifact,
 )
 from autops.wm.cem import CEMConfig
-from autops.wm.jepa import LeWMConfig
-from autops.wm.schema import EVENTSAT_OBSERVATIONS, load_trace, write_trace
-from autops.wm.training import TrainingConfig, save_checkpoint, train_lewm
-
-OBS_DIM = len(EVENTSAT_OBSERVATIONS)
+from autops.wm.schema import load_trace, write_trace
+from autops.wm.training import save_checkpoint
 
 
 @pytest.fixture(scope="module")
-def evaluation_bundle(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, Path]:
-    pytest.importorskip("torch")
+def evaluation_bundle(
+    tmp_path_factory: pytest.TempPathFactory, tiny_lewm: Callable[[Any], Any]
+) -> tuple[Path, Path]:
     root = tmp_path_factory.mktemp("cem-evaluation")
     trace_path = export_trace(
         expand_coordinate("eventsat/sas/ao/symb", episodes=4, steps=7, seeds=[31, 32, 33, 34]),
@@ -37,33 +37,7 @@ def evaluation_bundle(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, P
         prefer_orekit=False,
     )
     trace = load_trace(trace_path)
-    trained = train_lewm(
-        trace,
-        model_config=LeWMConfig(
-            obs_dim=OBS_DIM,
-            action_dim=7,
-            embed_dim=8,
-            encoder_hidden_dim=8,
-            predictor_depth=1,
-            predictor_heads=1,
-            predictor_head_dim=8,
-            predictor_mlp_dim=16,
-            projector_hidden_dim=16,
-            dropout=0.0,
-            sigreg_knots=3,
-            sigreg_projections=4,
-        ),
-        training_config=TrainingConfig(
-            max_steps=1,
-            warmup_steps=0,
-            batch_size=2,
-            train_fraction=0.5,
-            seed=17,
-            validation_interval=1,
-            validation_sample_size=4,
-            train_loss_window=1,
-        ),
-    )
+    trained = tiny_lewm(trace)
     checkpoint = save_checkpoint(root / "model.pt", trained)
     fitted = fit_planner_artifact(trace_path, checkpoint, root / "planner.json", seed=23)
     artifact_path = Path(fitted["artifact"])

@@ -15,6 +15,7 @@ from autops.config import asset_root, expand_coordinate, parse_overrides, runtim
 from autops.core.exporter import export_traces
 from autops.core.probe_audit import FEATURE_FAMILIES, audit_probe_decodability
 from autops.core.runner import ExperimentRunner
+from autops.core.selection_audit import audit_candidate_selection
 from autops.core.workflows import (
     evaluate_lewm_cem,
     fit_planner_artifact,
@@ -122,6 +123,19 @@ def parser() -> argparse.ArgumentParser:
     audit.add_argument("--ridge", type=float, default=1e-3)
     audit.add_argument("--learning-rate", type=float, default=1e-3)
     audit.add_argument("--weight-decay", type=float, default=1e-4)
+    selection = training.add_parser(
+        "selection", help="score fixed candidate banks with the learned planner and oracle"
+    )
+    selection.add_argument("trace", type=Path)
+    selection.add_argument("--artifact", type=Path, required=True)
+    selection.add_argument("--output", type=Path, required=True)
+    selection.add_argument("--test-trace", type=Path)
+    selection.add_argument("--contexts", type=int, default=64)
+    selection.add_argument("--candidates", type=int, default=256)
+    selection.add_argument("--near-contact-fraction", type=float, default=0.5)
+    selection.add_argument("--mission-mode", default="science")
+    selection.add_argument("--device", default="cpu")
+    selection.add_argument("--seed", type=int, default=3072)
 
     board = commands.add_parser("board", help="build the unified static results board")
     board.add_argument(
@@ -211,6 +225,19 @@ def _train(args: argparse.Namespace) -> dict[str, Any]:
             mission_mode=args.mission_mode,
             max_episodes=args.max_episodes,
             overrides=parse_overrides(args.set),
+        )
+    if args.training_command == "selection":
+        return audit_candidate_selection(
+            args.trace,
+            args.artifact,
+            test_trace_path=args.test_trace,
+            output=args.output,
+            contexts=args.contexts,
+            candidates=args.candidates,
+            near_contact_fraction=args.near_contact_fraction,
+            mission_mode=args.mission_mode,
+            device=args.device,
+            seed=args.seed,
         )
     try:
         hidden = tuple(int(width) for width in args.hidden.split(",") if width)

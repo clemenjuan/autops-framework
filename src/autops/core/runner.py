@@ -20,6 +20,21 @@ from autops.paradigms.base import Paradigm
 from autops.paradigms.cg import ConventionalGround
 
 
+def eventsat_environment(
+    spec: ExperimentSpec, *, planning_horizon: int = 0, prefer_orekit: bool = True
+) -> EventSatEnvironment:
+    """Build the EventSat truth environment that a matrix coordinate runs in."""
+
+    return EventSatEnvironment(
+        spec.mission_config,
+        max_steps=spec.steps,
+        onboard_compute_active=spec.onboard_uses_jetson,
+        anomaly_requires_ground_pass=spec.paradigm in {"ag", "conventional"},
+        prefer_orekit=prefer_orekit,
+        planning_horizon=planning_horizon,
+    )
+
+
 @dataclass
 class ExperimentRunner:
     spec: ExperimentSpec
@@ -93,13 +108,8 @@ class ExperimentRunner:
             getattr(getattr(paradigm, role, None), "cem", None) for role in ("onboard", "ground")
         )
         horizon = max((search.horizon for search in searches if search is not None), default=0)
-        env = EventSatEnvironment(
-            self.spec.mission_config,
-            max_steps=self.spec.steps,
-            onboard_compute_active=self.spec.onboard_uses_jetson,
-            anomaly_requires_ground_pass=self.spec.paradigm in {"ag", "conventional"},
-            prefer_orekit=self.prefer_orekit,
-            planning_horizon=horizon,
+        env = eventsat_environment(
+            self.spec, planning_horizon=horizon, prefer_orekit=self.prefer_orekit
         )
         return env, paradigm
 

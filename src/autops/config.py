@@ -174,7 +174,7 @@ class ExperimentSpec(BaseModel):
     def validate_contract(self) -> ExperimentSpec:
         if len(self.seeds) != self.episodes:
             raise ValueError("seeds must contain exactly one paired seed per episode")
-        if self.output_root.is_absolute() or ".." in self.output_root.parts:
+        if self.output_root.anchor or ".." in self.output_root.parts:
             raise ValueError("output_root must be a safe relative path without ..")
         if self.paradigm == "ah":
             if not self.onboard_representation or not self.ground_representation:

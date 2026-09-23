@@ -56,7 +56,7 @@ def _entry(value: Any) -> ManifestEntry:
     checkpoint = value["checkpoint_sha256"]
     checkpoint_digest = None if checkpoint is None else _digest(checkpoint, "checkpoint_sha256")
     path = Path(str(value["path"]))
-    if path.is_absolute() or ".." in path.parts or path.suffix != ".json":
+    if path.anchor or ".." in path.parts or path.suffix != ".json":
         raise ValueError("manifest result paths must be safe relative JSON paths")
     return ManifestEntry(
         result_id=_digest(value["result_id"], "result_id"),

@@ -118,7 +118,7 @@ class PlannerRecipe:
     mode_weight_presets: dict[str, dict[str, float]]
 
     def __post_init__(self) -> None:
-        if not self.artifact_root or Path(self.artifact_root).is_absolute():
+        if not self.artifact_root or Path(self.artifact_root).anchor:
             raise ValueError("planner artifact_root must be a non-empty relative path")
         if self.exact_analytic_shaping:
             raise ValueError("canonical LeWM planning must not use exact analytical shaping")

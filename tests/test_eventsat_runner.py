@@ -54,6 +54,7 @@ def test_planner_energy_charges_the_decision_step_and_never_double_counts_jetson
 
     assert energy == pytest.approx(21.0 * 60.0 / 3600.0 + 0.01 + 2.0 * 3.0 / 3600.0)
     assert planner_event_energy_wh(config, "payload_compress") == 0.0
+    assert planner_event_energy_wh(config, "safe") == 0.0
 
 
 def test_refresh_almanac_updates_clock_without_truth_or_resource_leaks() -> None:

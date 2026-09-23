@@ -229,7 +229,8 @@ with the 60 s step `Δt`. This is an accounting bound that makes the charge inde
 of the host running the simulation; measured CEM or LLM time is kept only as a diagnostic.
 The power and boot/idle terms are declared under `power` in the mission configuration and
 are labelled `assumed` unless replaced by hardware evidence. Incremental planner energy is
-zero in modes whose base load already includes the Jetson. Board-level INA3221 rails cannot
+zero in modes whose base load already includes the Jetson and in safe mode, which keeps
+the payload computer off. Board-level INA3221 rails cannot
 replace the scalar model unless a non-overlapping total-input boundary is established;
 the current hardware results therefore retain every exposed rail separately.
 

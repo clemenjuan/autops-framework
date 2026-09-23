@@ -191,12 +191,13 @@ def planner_event_energy_wh(config: dict[str, Any], mode: str) -> float:
 
     Planning powers the Jetson for the whole decision step in which it plans, so
     the charge is independent of the host that runs the simulation. Modes that
-    already power the Jetson pay nothing extra. Measured planning time remains a
+    already power the Jetson pay nothing extra, and safe mode keeps the payload
+    computer off, so no planning happens there. Measured planning time remains a
     diagnostic and never enters the energy budget.
     """
 
     power = config["power"]
-    if mode in set(power.get("jetson_active_modes", [])):
+    if mode == "safe" or mode in set(power.get("jetson_active_modes", [])):
         return 0.0
     model = power.get("planner_compute", {})
     active_w = max(0.0, float(power.get("onboard_compute_w", 0.0)))

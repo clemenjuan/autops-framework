@@ -272,6 +272,20 @@ def _apply_projected_action(
     state["current_mode"] = EVENTSAT_ACTIONS[effective]
 
 
+def _set_projected_contact(
+    simulation: dict[str, Any], contacts_s: np.ndarray, offset: int, settling: int
+) -> None:
+    """Describe contact at a projected step; the record's present flags go stale."""
+
+    active = bool(contacts_s[offset] > 0.0)
+    simulation["contact_window_seconds"] = float(contacts_s[offset])
+    simulation["physical_ground_pass_active"] = active
+    simulation["station_visible"] = active
+    simulation["contact_window_active"] = bool(
+        np.any(contacts_s[offset : offset + settling + 1] > 0.0)
+    )
+
+
 def project_executable_candidates(
     state: Mapping[str, Any],
     sequences: np.ndarray,
@@ -303,11 +317,7 @@ def project_executable_candidates(
     for sample, row in enumerate(requested):
         simulation = dict(state)
         for offset, requested_value in enumerate(row):
-            simulation["contact_window_seconds"] = float(contacts_s[offset])
-            simulation["physical_ground_pass_active"] = contacts_s[offset] > 0.0
-            simulation["contact_window_active"] = bool(
-                np.any(contacts_s[offset : offset + settling + 1] > 0.0)
-            )
+            _set_projected_contact(simulation, contacts_s, offset, settling)
             mask = admissible_action_mask(
                 simulation,
                 reserve_soc=reserve_soc,
@@ -325,11 +335,7 @@ def project_executable_candidates(
             advance_projected_battery(
                 simulation, EVENTSAT_ACTIONS[effective], bool(sunlight[offset])
             )
-        simulation["contact_window_seconds"] = float(contacts_s[horizon])
-        simulation["physical_ground_pass_active"] = contacts_s[horizon] > 0.0
-        simulation["contact_window_active"] = bool(
-            np.any(contacts_s[horizon : horizon + settling + 1] > 0.0)
-        )
+        _set_projected_contact(simulation, contacts_s, horizon, settling)
         terminal.append(simulation)
     return CandidateProjection(projected, tuple(terminal), repairs, forced)
 

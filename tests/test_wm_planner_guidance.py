@@ -467,3 +467,27 @@ def test_projection_requires_contact_forecast_through_terminal_settling() -> Non
     requested = np.full((1, 48), EVENTSAT_ACTIONS.index("charging"), dtype=np.int64)
     with pytest.raises(ValueError, match="contact forecast"):
         project_executable_candidates(state, requested, reserve_soc=0.5, comms_soc_floor=0.25)
+
+
+def test_projection_does_not_carry_present_visibility_past_the_forecast_pass() -> None:
+    state = _state(
+        downlink_rate_kbps=50.0,
+        obc_data_mb=10.0,
+        battery_soc=0.9,
+        settling_time_steps=2,
+        current_mode="communication",
+        previous_mode="communication",
+        station_visible=True,
+        planning_contact_seconds=[60.0, 30.0] + [0.0] * 10,
+        planning_sunlight=[True] * 12,
+    )
+    requested = np.full((1, 6), EVENTSAT_ACTIONS.index("communication"), dtype=np.int64)
+    projected = project_executable_candidates(
+        state, requested, reserve_soc=0.5, comms_soc_floor=0.25
+    )
+    assert [EVENTSAT_ACTIONS[action] for action in projected.sequences[0]] == [
+        "communication",
+        "communication",
+        *["charging"] * 4,
+    ]
+    assert projected.terminal_states[0]["station_visible"] is False

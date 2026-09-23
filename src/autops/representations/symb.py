@@ -15,7 +15,6 @@ from autops.core.plugin import Representation, register
 from autops.core.types import DecisionContext, SpaceSpec
 from autops.missions.eventsat.observation import encode_vectors, onboard_view
 from autops.missions.eventsat.physics import MODES
-from autops.wm.schema import EVENTSAT_OBSERVATIONS
 
 
 def _action(mode: str, *, schedule: list[dict[str, Any]] | None = None) -> dict[str, Any]:
@@ -29,7 +28,6 @@ def _action(mode: str, *, schedule: list[dict[str, Any]] | None = None) -> dict[
 class EventSatSymbolic(Representation):
     """Reactive onboard rules over the onboard view; no pass or capacity forecast."""
 
-    observation_space = SpaceSpec((len(EVENTSAT_OBSERVATIONS),), "float32", -1.0, 1.0)
     action_space = SpaceSpec((7,), "int64", 0, 1, MODES)
 
     def encode_observation(self, observation: dict[str, Any]) -> dict[str, Any]:

@@ -26,10 +26,10 @@ class EnvironmentStep:
 
 @dataclass(frozen=True)
 class SpaceSpec:
-    """Dependency-free Gymnasium-compatible encoding seam for deferred RL."""
+    """Dependency-free Gymnasium-compatible encoding seam; bounds are scalar or per feature."""
 
     shape: tuple[int, ...]
     dtype: str
-    low: float | int
-    high: float | int
+    low: float | int | tuple[float, ...]
+    high: float | int | tuple[float, ...]
     labels: tuple[str, ...] = ()

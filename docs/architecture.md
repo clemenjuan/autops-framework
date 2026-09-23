@@ -82,7 +82,9 @@ Plugins register by mission, token, and role (`onboard`, `ground`, or `any`). Di
 walks the built-in representation package, the requested mission package only, and the
 `autops.representations` entry-point group. The runner does not maintain an import list.
 `SpaceSpec` exposes the observation/action boundary a later Gymnasium/RLlib adapter can
-use without adding Gymnasium to the base install.
+use without adding Gymnasium to the base install. EventSat observation bounds are per
+input and depend on the mission power model, so `observation_space(power)` in
+`autops.missions.eventsat.observation` derives them instead of a class constant.
 
 ## EventSat information boundary
 

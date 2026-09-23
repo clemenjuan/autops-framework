@@ -12,14 +12,18 @@ from test_wm_planner import _artifact
 from autops.config import expand_coordinate
 from autops.core.types import DecisionContext
 from autops.missions.eventsat.env import EventSatEnvironment
-from autops.missions.eventsat.observation import FORECAST_KEYS, encode_vectors
+from autops.missions.eventsat.observation import (
+    FORECAST_KEYS,
+    encode_vectors,
+    observation_space,
+)
 from autops.orbital import orekit
 from autops.representations.analytical_planner import EventSatAnalyticalCEM
 from autops.representations.symb import EventSatSymbolic
 from autops.representations.wm_planner import EventSatLeWMCEM
 from autops.wm.dataset import split_episodes
 from autops.wm.guidance import admissible_action_mask
-from autops.wm.schema import EVENTSAT_OBSERVATIONS, EVENTSAT_STATES
+from autops.wm.schema import EVENTSAT_ACTIONS, EVENTSAT_OBSERVATIONS, EVENTSAT_STATES
 
 
 def _environment(max_steps: int = 6, *, prefer_orekit: bool = False) -> EventSatEnvironment:
@@ -174,6 +178,22 @@ def test_storage_fills_resolve_one_product_and_reach_one_only_at_capacity() -> N
     assert _vector_value(observation, "obc_fill_log") > 0.05
     metadata.update(jetson_raw_mb=metadata["jetson_capacity_mb"], jetson_compressed_mb=0.0)
     assert _vector_value(observation, "jetson_fill_log") == pytest.approx(1.0)
+
+
+def test_every_encoded_input_stays_within_the_declared_bounds() -> None:
+    env = _environment(max_steps=240)
+    space = observation_space(env.config["power"])
+    low, high = np.asarray(space.low), np.asarray(space.high)
+    assert low[EVENTSAT_OBSERVATIONS.index("last_platform_energy_norm")] < -1.9
+    observation = env.reset(7)
+    energies = []
+    for step in range(env.max_steps):
+        vector = encode_vectors(observation)[0]
+        assert np.all(vector >= low - 1e-6) and np.all(vector <= high + 1e-6)
+        energies.append(vector[EVENTSAT_OBSERVATIONS.index("last_platform_energy_norm")])
+        mode = EVENTSAT_ACTIONS[(step // 6) % len(EVENTSAT_ACTIONS)]
+        observation = env.step({"eventsat_0": {"mode": mode}}).observation
+    assert min(energies) < -1.0
 
 
 def test_countdowns_without_a_later_event_are_censored_labels() -> None:

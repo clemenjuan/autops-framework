@@ -25,6 +25,7 @@ from typing import Any
 
 import numpy as np
 
+from autops.core.types import SpaceSpec
 from autops.missions.eventsat.transitions import record_number
 from autops.orbital import NavigationTrack
 from autops.wm.schema import EVENTSAT_ACTIONS as MODES
@@ -285,11 +286,39 @@ def encode_vectors(observation: dict[str, Any]) -> tuple[np.ndarray, np.ndarray,
     return obs, state, raw
 
 
+_SIGNED_INPUTS = frozenset(
+    (
+        *(f"position_itrf_{axis}_norm" for axis in "xyz"),
+        *(f"velocity_itrf_{axis}_norm" for axis in "xyz"),
+        *(f"sun_itrf_{axis}" for axis in "xyz"),
+        "station_elevation_sin",
+    )
+)
+
+
+def observation_space(power: Mapping[str, Any]) -> SpaceSpec:
+    """Per-input bounds of the encoded onboard vector under one mission power model.
+
+    Every input is a fraction, flag, log fill, or one-hot in [0, 1] except the signed
+    geometry in [-1, 1] and the net platform energy, whose lower bound is the largest
+    mode load over one step of peak solar generation (about -2 for EventSat).
+    """
+
+    solar = power["solar_panels"]
+    generation_w = float(solar["generation_peak_w"]) * float(solar["panel_efficiency_factor"])
+    peak_load_w = max(float(load) for mode in MODES for load in power["consumption"][mode].values())
+    bounds = {name: (-1.0, 1.0) for name in _SIGNED_INPUTS}
+    bounds["last_platform_energy_norm"] = (-peak_load_w / max(generation_w, 1e-12), 1.0)
+    low, high = zip(*(bounds.get(name, (0.0, 1.0)) for name in EVENTSAT_OBSERVATIONS), strict=True)
+    return SpaceSpec((len(EVENTSAT_OBSERVATIONS),), "float32", low, high, EVENTSAT_OBSERVATIONS)
+
+
 __all__ = [
     "FORECAST_KEYS",
     "encode_vectors",
     "idle_interval",
     "interval_feedback",
     "navigation_fix",
+    "observation_space",
     "onboard_view",
 ]

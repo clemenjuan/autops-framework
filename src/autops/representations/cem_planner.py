@@ -79,7 +79,6 @@ class EventSatCEMBase(Representation):
     uses_checkpoint: bool
     forecast_oracle: bool
 
-    observation_space = SpaceSpec((len(EVENTSAT_OBSERVATIONS),), "float32", -1.0, 1.0)
     action_space = SpaceSpec((7,), "int64", 0, 1, MODES)
 
     def __init__(self, config: dict[str, Any] | None = None) -> None:

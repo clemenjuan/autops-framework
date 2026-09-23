@@ -28,7 +28,6 @@ from autops.missions.eventsat.observation import encode_vectors, onboard_view
 from autops.missions.eventsat.physics import MODES
 from autops.paradigms.base import expand_schedule
 from autops.wm.cem import CEMConfig
-from autops.wm.schema import EVENTSAT_OBSERVATIONS
 
 _VALID_MODES = frozenset(MODES)
 _OPERATIONAL_MODES = frozenset(
@@ -83,7 +82,6 @@ def _merge_schedule(blocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
 class LLMSchedulePlanner(Representation):
     """Shared schedule parser, bounded LLM loop, and optional symbolic shield."""
 
-    observation_space = SpaceSpec((len(EVENTSAT_OBSERVATIONS),), "float32", -1.0, 1.0)
     action_space = SpaceSpec((7,), "int64", 0, 1, MODES)
     symbolic_grounding: ClassVar[bool] = False
     agentic: ClassVar[bool] = False

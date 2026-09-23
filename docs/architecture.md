@@ -330,6 +330,10 @@ canonical environment. The runner deploys the same adapter and shield, and a par
 test drives both paths with identical actions. Training episodes draw launch seeds from
 10^6 upwards, keeping the small paired evaluation seeds unseen. The reward is the
 mission's; optional potential-based pipeline shaping is added only inside the bridge.
+An EventSat AH coordinate trains the onboard policy inside the hybrid paradigm: the
+coordinate's ground planner plans at contacts, and the paradigm's `arbitrate` applies
+plan promotion and override to the shielded onboard modes before the environment steps,
+so the policy learns under the authority it is later evaluated with.
 SSA agents follow the organisation layer: SAS and CMAS agents command every satellite,
 HMAS agents their cluster, and IMAS and DMAS agents their own satellite, each observing a
 fixed scope in which a satellite hidden by the channel encodes as zeros. The SSA

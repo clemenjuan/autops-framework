@@ -254,3 +254,54 @@ def test_trained_checkpoint_is_evaluated_through_the_runner(tmp_path: Path) -> N
     context = DecisionContext(representation.encode_observation(observation), observation, None, 0)
     first = representation.select_action(context)
     assert first == representation.select_action(context)
+
+
+@pytest.mark.rl
+def test_hybrid_training_bridge_arbitrates_like_the_runner() -> None:
+    pytest.importorskip("ray")
+    from autops.memory.fixed import FixedMemory
+    from autops.paradigms.ah import AutonomousHybrid
+    from autops.representations.symb import EventSatSymbolicScheduler
+    from autops.rl.rllib_env import AUTOPSRLLibMultiAgentEnv
+
+    spec = expand_coordinate(
+        "eventsat/sas/ah/rl/symb",
+        steps=720,
+        overrides={"mission": {"anomalies": {"probability_per_step": 0.0}}},
+    )
+    env = eventsat_environment(spec, prefer_orekit=False)
+    bridge = AUTOPSRLLibMultiAgentEnv(
+        {"spec": spec.model_dump(mode="json"), "recipe": {}, "prefer_orekit": False}
+    )
+    encoded, _ = bridge.reset(seed=11)
+    episode_seed = bridge._environment._seed
+    rng = np.random.default_rng(5)
+    representation = EventSatRL({"rl_mock": True})
+    scripted = _Scripted([])
+    representation._policy = scripted
+    paradigm = AutonomousHybrid(
+        representation, EventSatSymbolicScheduler({"conventional": False}), FixedMemory()
+    )
+    observation = env.reset(episode_seed)
+    paradigm.reset(episode_seed, observation)
+    overridden = 0
+    for _ in range(spec.steps):
+        # Communicate at contact so the plan is uplinked; elsewhere request productive work.
+        action = 1 if env.physical_contact_active() else int(rng.choice([2, 3, 4, 5]))
+        scripted.actions.append(action)
+        np.testing.assert_array_equal(
+            encoded["central_agent"], representation.encode_observation(observation)["vector"]
+        )
+        encoded, rewards, terminated, _, _ = bridge.step({"central_agent": np.asarray([action])})
+        adapter = representation.adapter
+        onboard = adapter.ground_decoded_action(adapter.decode_action([action]), observation)
+        decision = paradigm.act(observation, physical_contact=env.physical_contact_active())
+        overridden += decision.actions["eventsat_0"]["mode"] != onboard["eventsat_0"]["mode"]
+        step = env.step(decision.actions)
+        paradigm.after_step(step.info, step.observation)
+        observation = step.observation
+        assert rewards["central_agent"] == pytest.approx(step.reward)
+        if terminated["__all__"]:
+            break
+    assert paradigm.ground.last_rationale is not None
+    assert overridden > 0

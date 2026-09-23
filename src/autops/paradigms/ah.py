@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any
 
 from autops.core.plugin import Representation
@@ -18,8 +19,15 @@ from autops.paradigms.base import (
 
 
 class AutonomousHybrid(Paradigm):
+    """Fresh onboard decisions arbitrated against a link-gated ground plan.
+
+    ``act`` asks the onboard representation; ``arbitrate`` takes an onboard decision
+    from any source, so the RLlib bridge trains under the same arbitration the runner
+    evaluates. A training bridge passes no onboard representation.
+    """
+
     def __init__(
-        self, onboard: Representation, ground: Representation, memory: FixedMemory
+        self, onboard: Representation | None, ground: Representation, memory: FixedMemory
     ) -> None:
         super().__init__(memory)
         self.onboard = onboard
@@ -31,7 +39,8 @@ class AutonomousHybrid(Paradigm):
 
     def reset(self, seed: int, observation: dict[str, Any]) -> None:
         super().reset(seed, observation)
-        self.onboard.reset(seed)
+        if self.onboard is not None:
+            self.onboard.reset(seed)
         self.ground.reset(seed + 1)
         self._ground_view = observation
         self._active = []
@@ -39,7 +48,24 @@ class AutonomousHybrid(Paradigm):
         self._was_contact = False
 
     def act(self, observation: dict[str, Any], *, physical_contact: bool) -> ParadigmDecision:
+        if self.onboard is None:
+            raise RuntimeError("an onboard representation is required to act")
         onboard_actions, latency = self._decide(self.onboard, observation, role="onboard")
+        decision = self.arbitrate(
+            onboard_actions, observation, physical_contact=physical_contact, latency_s=latency
+        )
+        return replace(decision, rationale=self.onboard.last_rationale)
+
+    def arbitrate(
+        self,
+        onboard_actions: dict[str, Any],
+        observation: dict[str, Any],
+        *,
+        physical_contact: bool,
+        latency_s: float = 0.0,
+    ) -> ParadigmDecision:
+        """Plan on the ground at contact entry; defer to the plan unless onboard protects."""
+
         onboard_mode = sat_mode(onboard_actions)
         ground_latency = 0.0
         if physical_contact and not self._was_contact:
@@ -61,12 +87,7 @@ class AutonomousHybrid(Paradigm):
             else {}
         )
         actions = onboard_actions if selected == onboard_mode else mode_action(selected, **compute)
-        return ParadigmDecision(
-            actions,
-            latency,
-            ground_latency_s=ground_latency,
-            rationale=self.onboard.last_rationale,
-        )
+        return ParadigmDecision(actions, latency_s, ground_latency_s=ground_latency)
 
     def after_step(self, info: dict[str, Any], observation: dict[str, Any]) -> None:
         super().after_step(info, observation)

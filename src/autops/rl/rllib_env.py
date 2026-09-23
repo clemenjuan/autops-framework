@@ -5,7 +5,9 @@ adapter encodes its scoped view and decodes its commands through the same
 controller-visible shield used at evaluation. The organisation's
 ``distribute_observation`` and ``collect_actions`` are the ones the runner uses,
 so training and evaluation share one MDP. Autonomous-onboard paradigms observe
-fresh telemetry and act immediately, so no paradigm hook intervenes.
+fresh telemetry and act immediately. Under the EventSat hybrid paradigm the chosen
+onboard command passes the same ``AutonomousHybrid.arbitrate`` as at evaluation, with
+the coordinate's ground representation planning at contact entry.
 
 Training episodes draw launch seeds from ``TRAINING_SEED_FLOOR`` upwards, which
 keeps the small paired evaluation seeds unseen during training.
@@ -19,19 +21,22 @@ import numpy as np
 from ray.rllib.env.multi_agent_env import MultiAgentEnv
 
 from autops.config import ExperimentSpec
+from autops.core.plugin import create_representation
 from autops.core.runner import eventsat_environment
 from autops.core.ssa_runner import ssa_environment
+from autops.memory.fixed import FixedMemory
 from autops.missions.ssa.rewards import SSARewardFunction
 from autops.organisations import AgentAction, bind_communication_topology
 from autops.organisations.base import validate_agent_satellite_mapping
 from autops.organisations.loops import organisation_options
 from autops.organisations.topologies import ORGANISATIONS
+from autops.paradigms.ah import AutonomousHybrid
 from autops.rl.diagnostics import accumulate, empty_diagnostics
 from autops.rl.shaping import PipelineShaping, pipeline_state
 from autops.rl.spaces import RLSpaceAdapter, make_space_adapter
 
 TRAINING_SEED_FLOOR = 1_000_000
-SUPPORTED_PARADIGMS = frozenset({"ao"})
+SUPPORTED_PARADIGMS = frozenset({"ao", "ah"})
 
 
 class AUTOPSRLLibMultiAgentEnv(MultiAgentEnv):
@@ -46,7 +51,10 @@ class AUTOPSRLLibMultiAgentEnv(MultiAgentEnv):
                 f"RL training supports the {sorted(SUPPORTED_PARADIGMS)} paradigms; "
                 f"{self.spec.paradigm!r} needs its paradigm hooks in the bridge first"
             )
+        if self.spec.paradigm == "ah" and self.spec.mission != "eventsat":
+            raise ValueError("hybrid RL training arbitrates EventSat ground plans only")
         recipe = dict(config.get("recipe", {}))
+        self._paradigm = _hybrid_paradigm(self.spec) if self.spec.paradigm == "ah" else None
         self._environment = _mission_environment(self.spec, bool(config.get("prefer_orekit", True)))
         self._organisation = ORGANISATIONS[self.spec.organisation](organisation_options(self.spec))
         self._organisation.initialize(_satellite_ids(self._environment))
@@ -92,6 +100,8 @@ class AUTOPSRLLibMultiAgentEnv(MultiAgentEnv):
             self._seed_rng = np.random.default_rng(TRAINING_SEED_FLOOR + int(seed))
         episode_seed = int(self._seed_rng.integers(TRAINING_SEED_FLOOR, 2**31 - 1))
         self._observation = self._environment.reset(episode_seed)
+        if self._paradigm is not None:
+            self._paradigm.reset(episode_seed, self._observation)
         self._organisation.initialize(_satellite_ids(self._environment))
         bind_communication_topology(self._organisation, self._environment)
         self.agents = list(self.possible_agents)
@@ -110,8 +120,16 @@ class AUTOPSRLLibMultiAgentEnv(MultiAgentEnv):
                 action = adapter.ground_decoded_action(decoded, views[agent_id])
                 plans[agent_id] = AgentAction(agent_id, action)
         commands = organisation.collect_actions(plans, channel)
+        if self._paradigm is not None:
+            commands = self._paradigm.arbitrate(
+                commands,
+                observation,
+                physical_contact=self._environment.physical_contact_active(),
+            ).actions
         before = pipeline_state(self._environment) if self._shaping else None
         result = self._environment.step(commands)
+        if self._paradigm is not None:
+            self._paradigm.after_step(result.info, result.observation)
         satellite_rewards = self._satellite_rewards(result, before)
         if self._diagnostics:
             satellite_id = self._environment.satellite_id
@@ -165,6 +183,18 @@ class AUTOPSRLLibMultiAgentEnv(MultiAgentEnv):
                 is_final_step=bool(result.done),
             )
         return {environment.satellite_id: reward}
+
+
+def _hybrid_paradigm(spec: ExperimentSpec) -> AutonomousHybrid:
+    """The runner's hybrid paradigm with its ground core; RLlib supplies the onboard core."""
+
+    ground = create_representation(
+        spec.mission,
+        spec.ground_token or "",
+        "ground",
+        {**spec.representation_config, "conventional": False},
+    )
+    return AutonomousHybrid(None, ground, FixedMemory())
 
 
 def _mission_environment(spec: ExperimentSpec, prefer_orekit: bool) -> Any:

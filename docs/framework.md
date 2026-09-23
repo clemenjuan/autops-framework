@@ -54,7 +54,7 @@ are M-01…M-14 as for every representation. `hrl` remains reserved with
 
 EventSat now has three distinct counts. The historical baseline remains the canonical
 32-cell design, the union of that baseline and the presently declared extensions has 43
-study cells, and 24 of those cells are executable today. Keeping these counts separate
+study cells, and 29 of those cells are executable today. Keeping these counts separate
 prevents declared but unimplemented coordinates from being mistaken for implementations.
 
 The historical baseline is:
@@ -81,16 +81,17 @@ The declared study total is therefore `32 + 4 + 2 + 5 = 43`. The executable subs
 | `conventional` | 1 |
 | `ag` | 5 |
 | `ao` | 8 |
-| `ah` | 10 |
-| **Total** | **24** |
+| `ah` | 15 |
+| **Total** | **29** |
 
 - `conventional`: ground `symb`;
 - `ag`: ground `symb`, `llm-s`, `llm-a`, `hllm-s`, or `hllm-a`;
 - `ao`: onboard `symb`, `rl`, `llm-s`, `llm-a`, `hllm-s`, `hllm-a`, `analytical-cem`, or `lewm-cem`;
-- `ah`: onboard `symb` or `lewm-cem`, paired with any runnable AG ground representation.
+- `ah`: onboard `symb`, `rl`, or `lewm-cem`, paired with any runnable AG ground representation.
 
-Of the historical cells, AO onboard `rl` runs; ground `rl` and hybrid `rl` pairings,
-and every cell with the reserved `hrl` token, remain documented but do not run. EventSat uses `sas`; SSA has prototype implementations of all five organisation tokens with the
+Of the historical cells, AO onboard `rl` and AH onboard `rl` with the five runnable
+ground representations run; ground `rl`, in AG and as an AH ground core, and every cell
+with the reserved `hrl` token, remain documented but do not run. EventSat uses `sas`; SSA has prototype implementations of all five organisation tokens with the
 symbolic and `rl` AO representations and declared constellation sizes 20 and 100; scale validation
 and CTDE world models belong to the later constellation study.
 

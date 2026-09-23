@@ -51,7 +51,7 @@ representations:
 
 # Historical 32-cell EventSat baseline. The runnable mission declaration below
 # adds six AO planners and five LeWM-AH pairings, so the union is currently 43
-# declared study cells, of which 24 are executable. hrl remains reserved.
+# declared study cells, of which 29 are executable. hrl remains reserved.
 canonical_eventsat_32:
   conventional:
     ground: [symb]
@@ -74,7 +74,7 @@ missions:
       ao:
         onboard: [symb, rl, llm-s, llm-a, hllm-s, hllm-a, analytical-cem, lewm-cem]
       ah:
-        onboard: [symb, lewm-cem]
+        onboard: [symb, rl, lewm-cem]
         ground: [symb, llm-s, llm-a, hllm-s, hllm-a]
   ssa:
     organisations: [sas, cmas, dmas, hmas, imas]

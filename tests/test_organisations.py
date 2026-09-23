@@ -89,3 +89,21 @@ def test_decentralised_memory_cannot_recover_remote_truth_after_step() -> None:
     assert "ssa_custody_utility" not in remembered["global"]
     assert "info" not in record
     assert controller.memories["sat_0"].recent(0) == ()
+
+
+def test_organisations_create_decision_loops_through_the_plugin_registry(monkeypatch) -> None:
+    from autops.core import plugin
+
+    created: list[tuple[str, str, str]] = []
+    original = plugin.create_representation
+
+    def recording(mission: str, token: str, role: str, config: dict | None = None):
+        created.append((mission, token, role))
+        return original(mission, token, role, config)
+
+    monkeypatch.setattr("autops.organisations.ssa.create_representation", recording)
+    controller = create_organisation("imas", {"representation": "symb"})
+    observation = {"step": 0, "satellites": {"sat_0": {}, "sat_1": {}}, "global": {}}
+    controller.reset(0, observation)
+    controller.act(observation)
+    assert created == [("ssa", "symb", "onboard")] * 2

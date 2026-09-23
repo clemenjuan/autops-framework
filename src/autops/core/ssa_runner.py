@@ -29,6 +29,7 @@ def _organisation_config(spec: ExperimentSpec) -> dict[str, Any]:
     policy.setdefault("custody_tau_steps", custody)
     policy.setdefault("isl_aoi_threshold_steps", relay)
     config["policy"] = policy
+    config["representation"] = spec.onboard_token
     return config
 
 

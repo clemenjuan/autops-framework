@@ -6,9 +6,9 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any
 
+from autops.core.plugin import Representation, create_representation
 from autops.core.types import DecisionContext
 from autops.memory.fixed import FixedMemory
-from autops.missions.ssa.policy import RuleBasedSSA
 from autops.missions.ssa.topology import build_leader_hierarchy
 
 
@@ -63,10 +63,15 @@ def scope_observation(observation: dict[str, Any], members: list[str]) -> dict[s
 
 @dataclass
 class OrganisationController:
-    """Common lifecycle for organisation-specific symbolic AO allocation."""
+    """Common lifecycle for organisation-specific AO allocation.
+
+    Each decision loop is an SSA representation plugin created from the
+    coordinate's onboard token. It receives the organisation's scoped view and
+    returns commands for the satellites in that view.
+    """
 
     config: dict[str, Any] = field(default_factory=dict)
-    policies: dict[str, RuleBasedSSA] = field(default_factory=dict, init=False)
+    policies: dict[str, Representation] = field(default_factory=dict, init=False)
     memories: dict[str, FixedMemory] = field(default_factory=dict, init=False)
     _pending_records: dict[str, dict[str, Any]] = field(default_factory=dict, init=False)
     coordination_messages: int = field(default=0, init=False)
@@ -81,10 +86,11 @@ class OrganisationController:
             satellite_id: 0 for satellite_id in observation.get("satellites", {})
         }
 
-    def _policy(self, agent_id: str, seed: int = 0) -> RuleBasedSSA:
+    def _policy(self, agent_id: str, seed: int = 0) -> Representation:
         if agent_id not in self.policies:
+            token = str(self.config.get("representation", "symb"))
             policy_config = dict(self.config.get("policy", {}))
-            policy = RuleBasedSSA(policy_config)
+            policy = create_representation("ssa", token, "onboard", policy_config)
             policy.reset(seed)
             self.policies[agent_id] = policy
             self.memories[agent_id] = FixedMemory()

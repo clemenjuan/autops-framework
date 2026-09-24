@@ -520,3 +520,24 @@ def test_command_prefixes_forecast_requested_commands_like_truth() -> None:
             assert bool(projected.terminal_forced[offset]) == info["forced"]
             for field, value in env.state.pipeline().items():
                 assert state.get(field, 0.0) == pytest.approx(value), field
+
+
+def test_projection_does_not_count_a_command_dropped_while_settling_as_forced() -> None:
+    from autops.config import expand_coordinate
+    from autops.missions.eventsat.env import EventSatEnvironment
+    from autops.missions.eventsat.observation import encode_vectors
+    from autops.wm.guidance import project_command_prefixes
+
+    config = expand_coordinate("eventsat/sas/ao/symb").mission_config
+    config["anomalies"]["probability_per_step"] = 0.0
+    config["power"]["battery"]["initial_soc"] = 0.35
+    env = EventSatEnvironment(config, max_steps=8, prefer_orekit=False)
+    env.reset(3)
+    _, _, raw = encode_vectors(env.observe())
+    modes = ("communication", "payload_observe", "payload_observe")
+    requested = np.asarray([EVENTSAT_ACTIONS.index(mode) for mode in modes])
+    projected = project_command_prefixes(raw, requested)
+    for offset, mode in enumerate(modes):
+        info = env.step({"eventsat_0": {"mode": mode}}).info
+        assert bool(projected.terminal_forced[offset]) == info["forced"], offset
+    assert info["forced"] and not projected.terminal_forced[:2].any()

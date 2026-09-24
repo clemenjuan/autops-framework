@@ -222,11 +222,14 @@ def _resolved_action(state: dict[str, Any], requested: int, settling: int) -> in
         battery_soc=battery_soc,
         constraints=state.get("mode_constraints", {}),
     )
-    state["forced"] = resolved != EVENTSAT_ACTIONS[requested]
+    remaining = max(0, int(record_number(state, "transition_steps_remaining")))
+    # As in the environment, a command dropped while settling is not an override.
+    ignored = remaining > 0 and not mandatory_safe
+    state["forced"] = resolved != EVENTSAT_ACTIONS[requested] and not ignored
     effective, previous, remaining, _ = settle_mode(
         resolved,
         str(state.get("previous_mode", state.get("current_mode", "charging"))),
-        max(0, int(record_number(state, "transition_steps_remaining"))),
+        remaining,
         settling,
         set(state.get("attitude_maneuver_modes", ("payload_observe", "communication"))),
         mandatory_safe=mandatory_safe,

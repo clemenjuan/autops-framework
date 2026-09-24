@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import replace
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
@@ -31,7 +32,8 @@ def test_fallback_environment_uses_configured_physics() -> None:
     assert metadata["settling_time_steps"] == 2
     assert not metadata["in_sunlight"]
     assert metadata["navigation"] == {"valid": False}
-    assert all(0.0 <= value <= 360.0 for value in env.state.orbit_elements.values())
+    angles = {key: value for key, value in env.state.orbit_elements.items() if key != "epoch"}
+    assert all(0.0 <= value <= 360.0 for value in angles.values())
 
     step = env.step({"eventsat_0": {"mode": "charging", "jetson_planned": False}})
     expected_gross_wh = 4.32 * 60.0 / 3_600.0
@@ -372,7 +374,8 @@ def test_orekit_observation_carries_the_current_navigation_fix() -> None:
     navigation = env.observe()["satellites"]["eventsat_0"]["metadata"]["navigation"]
     track = env.orbit.navigation
     assert navigation["valid"] and navigation["frame"] == "ITRF/IERS-2010"
-    assert navigation["utc"] == "2026-06-01T00:01:00+00:00"
+    start = datetime.fromisoformat(env.episode_provenance()["orbit"]["epoch"])
+    assert navigation["utc"] == (start + timedelta(minutes=1)).isoformat()
     assert navigation["position_km"] == track.position_km[1].tolist()
     assert navigation["velocity_km_s"] == track.velocity_km_s[1].tolist()
     assert navigation["station_elevation_deg"] == track.station_elevation_deg[1]

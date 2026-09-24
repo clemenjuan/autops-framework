@@ -73,6 +73,30 @@ def test_launch_lottery_is_seeded_and_does_not_mutate_input(orbit: OrbitElements
     )
 
 
+def test_launch_lottery_draws_a_paired_start_without_moving_the_angles(
+    orbit: OrbitElements,
+) -> None:
+    from datetime import timedelta
+
+    fixed = apply_launch_lottery(orbit, 42)
+    first = apply_launch_lottery(orbit, 42, epoch_window_days=365.0)
+    assert first == apply_launch_lottery(orbit, 42, epoch_window_days=365.0)
+    assert (first.raan_deg, first.arg_perigee_deg, first.true_anomaly_deg) == (
+        fixed.raan_deg,
+        fixed.arg_perigee_deg,
+        fixed.true_anomaly_deg,
+    )
+    assert fixed.epoch == orbit.epoch
+    starts = {
+        apply_launch_lottery(orbit, seed, epoch_window_days=365.0).epoch for seed in range(20)
+    }
+    assert len(starts) == 20
+    assert all(orbit.epoch <= start < orbit.epoch + timedelta(days=365) for start in starts)
+    assert all(start.second == 0 and start.microsecond == 0 for start in starts)
+    with pytest.raises(ValueError, match="epoch_window_days"):
+        apply_launch_lottery(orbit, 42, epoch_window_days=-1.0)
+
+
 def test_seeded_fallback_is_reproducible_and_local(
     orbit: OrbitElements,
     fallback: SimplifiedModel,

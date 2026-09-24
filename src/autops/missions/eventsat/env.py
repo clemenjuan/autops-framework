@@ -100,9 +100,12 @@ class EventSatEnvironment:
         self._arrival_rng.seed(anomaly_seed)
         self._duration_rng.seed(anomaly_seed + 104729)
         elements = orbit_elements(self.config)
-        if self.config["orbit"].get("launch_lottery", False):
-            elements = apply_launch_lottery(elements, self._seed)
+        orbit = self.config["orbit"]
+        if orbit.get("launch_lottery", False):
+            window = float(orbit.get("launch_lottery_epoch_days", 0.0))
+            elements = apply_launch_lottery(elements, self._seed, epoch_window_days=window)
         self.state.orbit_elements = {
+            "epoch": elements.epoch.isoformat(),
             "raan_deg": elements.raan_deg,
             "arg_perigee_deg": elements.arg_perigee_deg,
             "true_anomaly_deg": elements.true_anomaly_deg,

@@ -66,7 +66,7 @@ class EventSatState:
     cumulative_gross_wh: float = 0.0
     cumulative_solar_wh: float = 0.0
     cumulative_planner_wh: float = 0.0
-    orbit_elements: dict[str, float] = field(default_factory=dict)
+    orbit_elements: dict[str, Any] = field(default_factory=dict)
 
     def pipeline(self) -> dict[str, Any]:
         return {

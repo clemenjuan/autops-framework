@@ -22,6 +22,9 @@ orbit:
   eclipse_fraction: 0.36
   propagator: j2
   launch_lottery: true
+  # Each seed also draws its start uniformly over one year from simulation.epoch, so the
+  # date is not an episode clock; paired arms share a seed and therefore its start.
+  launch_lottery_epoch_days: 365
 
 satellite:
   form_factor: 6U

@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 import random
 from dataclasses import dataclass, replace
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Literal
 
 import numpy as np
@@ -46,20 +46,31 @@ class OrbitElements:
                 raise ValueError(f"{name} must be finite")
 
 
-def apply_launch_lottery(orbit: OrbitElements, seed: int) -> OrbitElements:
-    """Return an orbit with reproducibly sampled orientation angles.
+def apply_launch_lottery(
+    orbit: OrbitElements, seed: int, *, epoch_window_days: float = 0.0
+) -> OrbitElements:
+    """Return an orbit with reproducibly sampled orientation angles and start time.
 
     Sampling order intentionally matches the mission lottery: RAAN, argument
-    of perigee, then true anomaly.
+    of perigee, then true anomaly. A positive ``epoch_window_days`` then draws
+    the start as a whole minute uniform in ``[epoch, epoch + window)``, so a
+    seed's angles do not depend on the window and every arm that shares a seed
+    shares its start time.
     """
 
+    if not math.isfinite(epoch_window_days) or epoch_window_days < 0.0:
+        raise ValueError("epoch_window_days must be finite and non-negative")
     rng = random.Random(seed)
-    return replace(
+    sampled = replace(
         orbit,
         raan_deg=rng.uniform(0.0, 360.0),
         arg_perigee_deg=rng.uniform(0.0, 360.0),
         true_anomaly_deg=rng.uniform(0.0, 360.0),
     )
+    minutes = round(epoch_window_days * 1440.0)
+    if minutes < 1:
+        return sampled
+    return replace(sampled, epoch=orbit.epoch + timedelta(minutes=rng.randrange(minutes)))
 
 
 @dataclass(frozen=True, slots=True)

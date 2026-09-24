@@ -142,6 +142,16 @@ def test_in_progress_jobs_are_accepted_and_only_missing_products_fail() -> None:
     assert not env.step({"eventsat_0": {"mode": "payload_compress"}}).info["action_accepted"]
 
 
+def test_each_seed_starts_at_its_own_paired_epoch() -> None:
+    starts = {}
+    for seed in (5, 5, 6):
+        env = _environment()
+        env.reset(seed)
+        starts.setdefault(seed, set()).add(env.episode_provenance()["orbit"]["epoch"])
+    assert len(starts[5]) == 1
+    assert starts[5] != starts[6]
+
+
 def test_planning_charge_reaches_the_battery_but_not_the_encoded_platform_energy() -> None:
     observations = {}
     for planned in (False, True):

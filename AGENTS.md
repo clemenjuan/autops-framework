@@ -27,7 +27,7 @@
 - The axes are Organisation × Representation × Operational paradigm. EventSat fixes `sas`; SSA exercises `sas`, `cmas`, `dmas`, `hmas`, and `imas`.
 - EventSat documents the canonical 32-cell design, while only real implementations run. `lewm-cem` is a first-class additional representation.
 - Preserve all M-01…M-14 definitions, paired episode seeds, mission prompts, and scenario parameters.
-- EventSat uses a 60 s step, 400 km / 97.4° SSO, launch-lottery RAAN/ArgP/TA, a 70 Wh battery, 50 kbps effective S-band, a three-pool data pipeline, 135 s settling, and environment-enforced anomaly safe mode.
+- EventSat uses a 60 s step, 400 km / 97.4° SSO, launch-lottery RAAN/ArgP/TA and start time, a 70 Wh battery, 50 kbps effective S-band, a three-pool data pipeline, 135 s settling, and environment-enforced anomaly safe mode.
 - Jetson compute power is added only to modes where the Jetson would otherwise be off; never double-count modes in `jetson_active_modes`.
 - Orekit Eckstein-Hechler J2 is the preferred orbital backend; the deterministic-seeded simplified backend is the documented fallback.
 - LeWM uses a JEPA-style objective, embed dimension 192, history 3, degenerate-target probe checks, affine `W,b` probes, and artifact `target_std` scale normalization by default.

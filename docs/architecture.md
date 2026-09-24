@@ -112,9 +112,12 @@ the illumination flag is geometric, not a measured power estimate.
 
 The following are deliberately not inputs:
 
-- elapsed-time surrogates: nominal orbital phase, episode progress, cumulative totals,
-  and the absolute date (the scenario uses one start epoch; time of day and season reach
-  the model through the Earth-fixed Sun direction);
+- elapsed-time surrogates: nominal orbital phase, episode progress, and cumulative
+  totals. The launch lottery draws each episode's start, to the minute, uniformly over
+  one year from the configured epoch, so the date and time of day that reach the model
+  through the Earth-fixed Sun direction no longer tell it how far into an episode it is.
+  With one shared start, the Sun's declination rose identically in every episode and
+  acted as an episode clock;
 - future-event information: pass and eclipse countdowns, remaining pass duration,
   next-pass and whole-episode transfer capacity, and contact or sunlight arrays;
 - declared constants such as capacities, rates, job durations, and station coordinates,
@@ -377,9 +380,8 @@ The split informed checkpoint selection and is explicitly labeled as validation.
 frames; an untrained encoder of the same architecture; elapsed time alone) with the same
 affine and MLP heads. Heads are fitted on the checkpoint's training episodes and scored on
 its validation episodes or, with `--test-trace`, on untouched seeds; test seeds that occur
-in the training trace are rejected. Every episode starts at the same epoch, so the
-Earth-fixed Sun vector also encodes elapsed time; the elapsed-time control bounds what such
-a clock explains. `train selection` replays logged episodes from their launch seeds, whose
+in the training trace are rejected. The elapsed-time control bounds what an episode
+clock explains; with drawn start times the Sun vector no longer provides one. `train selection` replays logged episodes from their launch seeds, whose
 records must re-encode to the logged observations exactly, and at sampled decision points
 scores one bank of requested command sequences with the deployed learned planner and the
 analytical oracle, each under its own information. It reports top-elite overlap, oracle

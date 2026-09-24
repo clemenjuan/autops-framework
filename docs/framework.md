@@ -195,7 +195,8 @@ run identities are reported separately in [Jetson planner evidence](jetson-bench
 ## Fairness and reproducibility
 
 - Every comparison uses `FixedMemory`; writable online learning is outside scope.
-- Launch-lottery and anomaly streams use paired episode seeds. Board validation checks
+- Launch-lottery (orientation angles and start time) and anomaly streams use paired
+  episode seeds. Board validation checks
   each recorded episode seed against its declared experiment index.
 - Physics, objectives, prompts, metric definitions, and trace action order are shared
   across applicable cells.

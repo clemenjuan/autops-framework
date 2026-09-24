@@ -186,8 +186,11 @@ schema. Older traces, checkpoints, and planner artifacts are rejected: a new obs
 contract requires re-export, retraining, and probe refitting, never padding or relabeling.
 
 Training and validation split launch seeds, not episode indices: every policy's
-realization of one physical episode stays on one side, and checkpoint v5 records the
+realization of one physical episode stays on one side, and checkpoint v6 records the
 per-episode seeds that define its split. With unique seeds this equals an episode shuffle.
+The recipe `seed` fixes that split; an optional `init_seed` (`train wm --init-seed`)
+changes only initialisation and minibatch sampling, so independently trained models share
+one split.
 Dataset windows never cross episode boundaries. LeWM uses a 192-dimensional embedding
 and history 3 with a JEPA-style action-conditioned objective. Probes are affine
 (`W`, `b`) and store target means/standard deviations plus degenerate-target labels.

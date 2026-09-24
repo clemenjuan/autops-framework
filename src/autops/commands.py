@@ -141,6 +141,7 @@ def parser() -> argparse.ArgumentParser:
     wm.add_argument("--max-steps", type=int, default=150_000)
     wm.add_argument("--batch-size", type=int, default=64)
     wm.add_argument("--device", default="cpu")
+    wm.add_argument("--init-seed", type=int)
     wm.add_argument(
         "--wandb-project",
         default=os.environ.get("WANDB_PROJECT", "space-world-models"),
@@ -243,6 +244,7 @@ def _train(args: argparse.Namespace) -> dict[str, Any]:
             max_steps=args.max_steps,
             batch_size=args.batch_size,
             device=args.device,
+            init_seed=args.init_seed,
             wandb_project=args.wandb_project,
             wandb_entity=args.wandb_entity,
             wandb_name=args.wandb_name,

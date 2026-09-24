@@ -31,12 +31,19 @@ from autops.wm.schema import (
     trace_sha256,
 )
 
-CHECKPOINT_SCHEMA_VERSION = "autops.lewm.checkpoint/v5"
+CHECKPOINT_SCHEMA_VERSION = "autops.lewm.checkpoint/v6"
 ValidationCallback = Callable[[int, Mapping[str, float]], None]
 
 
 @dataclass(frozen=True)
 class TrainingConfig:
+    """Optimizer, split, and seeding recipe.
+
+    ``seed`` fixes the seed-grouped episode split and the validation projections;
+    ``init_seed`` (default ``seed``) sets model initialisation and minibatch
+    sampling, so independently trained models can share one split.
+    """
+
     max_steps: int = 150_000
     warmup_steps: int = 2_000
     batch_size: int = 64
@@ -49,6 +56,11 @@ class TrainingConfig:
     validation_sample_size: int = 512
     train_loss_window: int = 1_000
     device: str = "cpu"
+    init_seed: int | None = None
+
+    @property
+    def model_seed(self) -> int:
+        return self.seed if self.init_seed is None else self.init_seed
 
     def __post_init__(self) -> None:
         if (
@@ -66,6 +78,8 @@ class TrainingConfig:
             raise ValueError("invalid optimizer configuration")
         if self.gradient_clip <= 0.0 or not 0.0 < self.train_fraction < 1.0:
             raise ValueError("gradient_clip and train_fraction must be positive")
+        if self.init_seed is not None and (isinstance(self.init_seed, bool) or self.init_seed < 0):
+            raise ValueError("init_seed must be a non-negative integer or None")
 
 
 def _normalizer_dict(normalizer: FeatureNormalizer) -> dict[str, list[float]]:
@@ -413,8 +427,8 @@ def train_lewm(
     )
     if training.validation_sample_size < len(windows.episodes.validation):
         raise ValueError("validation_sample_size must cover every validation episode")
-    torch.manual_seed(training.seed)
-    rng = np.random.default_rng(training.seed)
+    torch.manual_seed(training.model_seed)
+    rng = np.random.default_rng(training.model_seed)
     device = torch.device(training.device)
     model = build_vector_jepa(model_cfg).to(device)
     evidence = _optimize(model, windows, training, torch, device, rng, on_validation)

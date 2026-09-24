@@ -176,13 +176,20 @@ def train_world_model(
     max_steps: int = 150_000,
     batch_size: int = 64,
     device: str = "cpu",
+    init_seed: int | None = None,
     wandb_project: str = "space-world-models",
     wandb_entity: str | None = None,
     wandb_name: str | None = None,
 ) -> dict[str, Any]:
     trace = load_trace(trace_path)
     recipe = load_eventsat_recipe()
-    config = replace(recipe.training, max_steps=max_steps, batch_size=batch_size, device=device)
+    config = replace(
+        recipe.training,
+        max_steps=max_steps,
+        batch_size=batch_size,
+        device=device,
+        init_seed=init_seed,
+    )
     digest = trace_sha256(trace)
     tracking_config = _training_tracking_config(trace, recipe.model, config)
     tracker = WandbTrainingRun.start(

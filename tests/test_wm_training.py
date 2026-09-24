@@ -318,3 +318,43 @@ def test_objective_scale_uses_cumulative_spread_for_flows() -> None:
     assert scale[downlink] != pytest.approx(flows[:, downlink].std())
     assert scale[battery] == pytest.approx(flows[:, battery].std())
     assert scale[DEFAULT_ATTRIBUTES.index("anomaly_safe")] == 1.0
+
+
+def test_init_seed_changes_the_model_but_not_the_split() -> None:
+    pytest.importorskip("torch")
+    trace = _trace(np.random.default_rng(3).normal(size=(4, 8, OBS_DIM)).astype(np.float32))
+    config = LeWMConfig(
+        obs_dim=OBS_DIM,
+        action_dim=7,
+        embed_dim=8,
+        encoder_hidden_dim=8,
+        predictor_depth=1,
+        predictor_heads=1,
+        predictor_head_dim=8,
+        predictor_mlp_dim=16,
+        projector_hidden_dim=16,
+        sigreg_projections=4,
+    )
+    results = [
+        training_module.train_lewm(
+            trace,
+            model_config=config,
+            training_config=training_module.TrainingConfig(
+                max_steps=1,
+                warmup_steps=0,
+                batch_size=2,
+                train_fraction=0.5,
+                validation_interval=1,
+                validation_sample_size=4,
+                train_loss_window=1,
+                seed=17,
+                init_seed=init_seed,
+            ),
+        )
+        for init_seed in (None, 5)
+    ]
+    first, second = (result.checkpoint_contract for result in results)
+    assert first.episodes == second.episodes
+    assert first.training_config.model_seed == 17 and second.training_config.model_seed == 5
+    weights = [result.model.encoder[0].weight.detach() for result in results]
+    assert not np.allclose(weights[0].numpy(), weights[1].numpy())

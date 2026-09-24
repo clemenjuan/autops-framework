@@ -167,6 +167,28 @@ def _validate_probe_inputs(
     return X, Y, attribute_names
 
 
+def affine_readout(
+    features: np.ndarray, targets: np.ndarray, *, ridge: float = 1e-3
+) -> tuple[np.ndarray, np.ndarray]:
+    """Fit raw-unit ``W, b`` by ridge regression on standardized rows ``[row, dim]``."""
+
+    X = np.asarray(features, dtype=np.float64)
+    Y = np.asarray(targets, dtype=np.float64)
+    x_mean, x_std = X.mean(axis=0), X.std(axis=0)
+    x_std[x_std < 1e-8] = 1.0
+    y_mean, y_std = Y.mean(axis=0), Y.std(axis=0)
+    y_std[y_std < 1e-8] = 1.0
+    design = np.concatenate([(X - x_mean) / x_std, np.ones((X.shape[0], 1))], axis=1)
+    regularizer = ridge * np.eye(design.shape[1], dtype=np.float64)
+    regularizer[-1, -1] = 0.0
+    coefficients = np.linalg.solve(
+        design.T @ design + regularizer, design.T @ ((Y - y_mean) / y_std)
+    )
+    W = coefficients[:-1].T / x_std * y_std[:, None]
+    b = coefficients[-1] * y_std + y_mean - W @ x_mean
+    return W, b
+
+
 def fit_ridge_probe(
     features: np.ndarray,
     targets: np.ndarray,
@@ -189,8 +211,7 @@ def fit_ridge_probe(
     Xtr, Ytr = (episode_rows(values, train, np.float64) for values in (X, Y))
     Xv, Yv = (episode_rows(values, validation, np.float64) for values in (X, Y))
 
-    x_mean, x_std = Xtr.mean(axis=0), Xtr.std(axis=0)
-    x_std[x_std < 1e-8] = 1.0
+    W, b = affine_readout(Xtr, Ytr, ridge=ridge)
     target_mean, raw_target_std = Ytr.mean(axis=0), Ytr.std(axis=0)
     degenerate_mask = raw_target_std < 1e-8
     target_std = raw_target_std.copy()
@@ -202,16 +223,6 @@ def fit_ridge_probe(
             RuntimeWarning,
             stacklevel=2,
         )
-
-    Xn = (Xtr - x_mean) / x_std
-    Yn = (Ytr - target_mean) / target_std
-    design = np.concatenate([Xn, np.ones((Xn.shape[0], 1))], axis=1)
-    regularizer = ridge * np.eye(design.shape[1], dtype=np.float64)
-    regularizer[-1, -1] = 0.0
-    coefficients = np.linalg.solve(design.T @ design + regularizer, design.T @ Yn)
-    normalized_W, normalized_b = coefficients[:-1].T, coefficients[-1]
-    W = normalized_W / x_std * target_std[:, None]
-    b = normalized_b * target_std + target_mean - W @ x_mean
 
     prediction = Xv @ W.T + b
     residual = prediction - Yv
@@ -259,6 +270,7 @@ __all__ = [
     "FLOW_ATTRIBUTES",
     "TARGET_DEFINITION_VERSION",
     "ProbeFit",
+    "affine_readout",
     "build_eventsat_targets",
     "eventsat_attribute_values",
     "eventsat_targets",

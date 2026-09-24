@@ -52,20 +52,22 @@ def _bindings() -> SimpleNamespace:
 
         setup_orekit_data(filenames=str(orekit_data_path()), from_pip_library=False)
 
+        from org.hipparchus.geometry.euclidean.threed import Vector3D
         from org.orekit.bodies import CelestialBodyFactory, GeodeticPoint, OneAxisEllipsoid
         from org.orekit.frames import FramesFactory, TopocentricFrame
-        from org.orekit.orbits import KeplerianOrbit, PositionAngleType
+        from org.orekit.orbits import CartesianOrbit, KeplerianOrbit, PositionAngleType
         from org.orekit.propagation.analytical import (
             EcksteinHechlerPropagator,
             KeplerianPropagator,
         )
         from org.orekit.time import AbsoluteDate, TimeScalesFactory
-        from org.orekit.utils import Constants, IERSConventions
+        from org.orekit.utils import Constants, IERSConventions, TimeStampedPVCoordinates
     except Exception as exc:  # optional dependency and JVM errors share one boundary
         raise OrekitUnavailable(f"Orekit initialization failed: {exc}") from exc
 
     return SimpleNamespace(
         AbsoluteDate=AbsoluteDate,
+        CartesianOrbit=CartesianOrbit,
         CelestialBodyFactory=CelestialBodyFactory,
         Constants=Constants,
         EcksteinHechlerPropagator=EcksteinHechlerPropagator,
@@ -77,7 +79,9 @@ def _bindings() -> SimpleNamespace:
         OneAxisEllipsoid=OneAxisEllipsoid,
         PositionAngleType=PositionAngleType,
         TimeScalesFactory=TimeScalesFactory,
+        TimeStampedPVCoordinates=TimeStampedPVCoordinates,
         TopocentricFrame=TopocentricFrame,
+        Vector3D=Vector3D,
     )
 
 
@@ -136,8 +140,15 @@ def create_propagator(orbit: OrbitElements) -> OrekitPropagator:
     if orbit.propagator == "keplerian":
         return OrekitPropagator(bindings.KeplerianPropagator(keplerian), "keplerian", orbit.epoch)
 
-    raw = bindings.EcksteinHechlerPropagator(
-        keplerian,
+    return OrekitPropagator(
+        _eckstein_hechler(bindings, keplerian), "eckstein-hechler-j2", orbit.epoch
+    )
+
+
+def _eckstein_hechler(bindings: SimpleNamespace, orbit: Any) -> Any:
+    constants = bindings.Constants
+    return bindings.EcksteinHechlerPropagator(
+        orbit,
         constants.WGS84_EARTH_EQUATORIAL_RADIUS,
         constants.WGS84_EARTH_MU,
         constants.WGS84_EARTH_C20,
@@ -146,7 +157,6 @@ def create_propagator(orbit: OrbitElements) -> OrekitPropagator:
         0.0,
         0.0,
     )
-    return OrekitPropagator(raw, "eckstein-hechler-j2", orbit.epoch)
 
 
 def position_km(propagator: OrekitPropagator, elapsed_s: float) -> tuple[float, float, float]:
@@ -189,33 +199,8 @@ def sample_geometry(
     samples topocentric elevation and linearly interpolates AOS/LOS crossings.
     """
 
-    bindings = _bindings()
-    sun = bindings.CelestialBodyFactory.getSun()
-    earth = _earth(bindings)
-    itrf = earth.getBodyFrame()
-    frame = _ground_frame(bindings, station)
-    initial = propagator.raw.getInitialState().getDate()
     times = _sample_times(duration_s, sample_s)
-    shadow: list[bool] = []
-    elevation: list[float] = []
-    fixed_pv: list[tuple[float, ...]] = []
-    for elapsed_s in times:
-        state = propagator.raw.propagate(initial.shiftedBy(elapsed_s))
-        date = state.getDate()
-        satellite = state.getPVCoordinates().getPosition()
-        sun_position = sun.getPVCoordinates(date, state.getFrame()).getPosition()
-        shadow.append(_in_shadow(satellite, sun_position, earth.getEquatorialRadius()))
-        tracking = frame.getTrackingCoordinates(satellite, state.getFrame(), date)
-        elevation.append(math.degrees(tracking.getElevation()))
-        pv = state.getPVCoordinates(itrf)
-        sun_fixed = sun.getPVCoordinates(date, itrf).getPosition()
-        fixed_pv.append(
-            (
-                *_vector(pv.getPosition(), 1e-3),
-                *_vector(pv.getVelocity(), 1e-3),
-                *_vector(sun_fixed, 1.0 / sun_fixed.getNorm()),
-            )
-        )
+    shadow, elevation, fixed_pv = _sample(propagator.raw, station, times)
     grid = math.floor(duration_s / sample_s) + 1
     samples = np.asarray(fixed_pv[:grid], dtype=np.float64)
     return OrbitGeometry(
@@ -231,6 +216,76 @@ def sample_geometry(
             sun_unit=samples[:, 6:9],
             station_elevation_deg=np.asarray(elevation[:grid], dtype=np.float64),
         ),
+    )
+
+
+def _sample(
+    raw: Any, station: GroundStation, times: tuple[float, ...]
+) -> tuple[list[bool], list[float], list[tuple[float, ...]]]:
+    """Shadow, station elevation, and Earth-fixed position/velocity/Sun at each sample."""
+
+    bindings = _bindings()
+    sun = bindings.CelestialBodyFactory.getSun()
+    earth = _earth(bindings)
+    itrf = earth.getBodyFrame()
+    frame = _ground_frame(bindings, station)
+    initial = raw.getInitialState().getDate()
+    shadow: list[bool] = []
+    elevation: list[float] = []
+    fixed_pv: list[tuple[float, ...]] = []
+    for elapsed_s in times:
+        state = raw.propagate(initial.shiftedBy(elapsed_s))
+        date = state.getDate()
+        satellite = state.getPVCoordinates().getPosition()
+        sun_position = sun.getPVCoordinates(date, state.getFrame()).getPosition()
+        shadow.append(_in_shadow(satellite, sun_position, earth.getEquatorialRadius()))
+        tracking = frame.getTrackingCoordinates(satellite, state.getFrame(), date)
+        elevation.append(math.degrees(tracking.getElevation()))
+        pv = state.getPVCoordinates(itrf)
+        sun_fixed = sun.getPVCoordinates(date, itrf).getPosition()
+        fixed_pv.append(
+            (
+                *_vector(pv.getPosition(), 1e-3),
+                *_vector(pv.getVelocity(), 1e-3),
+                *_vector(sun_fixed, 1.0 / sun_fixed.getNorm()),
+            )
+        )
+    return shadow, elevation, fixed_pv
+
+
+def forecast_events_from_fix(
+    position_km: Any,
+    velocity_km_s: Any,
+    utc: datetime,
+    station: GroundStation,
+    *,
+    duration_s: float,
+    sample_s: float,
+) -> tuple[tuple[EclipseInterval, ...], tuple[GroundPass, ...]]:
+    """Forecast eclipses and station passes by propagating one navigation fix.
+
+    The Earth-fixed (ITRF) position and coordinate velocity at ``utc`` seed an
+    Eckstein-Hechler J2 propagation, the computation a spacecraft can run from
+    its own fix and the known station. Intervals are measured from ``utc`` with
+    the same sampling and crossing interpolation as the episode's events.
+    """
+
+    bindings = _bindings()
+    date = _absolute_date(bindings, utc)
+    itrf = _earth(bindings).getBodyFrame()
+    inertial = bindings.FramesFactory.getEME2000()
+    fixed = bindings.TimeStampedPVCoordinates(
+        date,
+        bindings.Vector3D(*(float(value) * 1e3 for value in position_km)),
+        bindings.Vector3D(*(float(value) * 1e3 for value in velocity_km_s)),
+    )
+    state = itrf.getTransformTo(inertial, date).transformPVCoordinates(fixed)
+    orbit = bindings.CartesianOrbit(state, inertial, date, bindings.Constants.WGS84_EARTH_MU)
+    times = _sample_times(duration_s, sample_s)
+    shadow, elevation, _ = _sample(_eckstein_hechler(bindings, orbit), station, times)
+    return (
+        _eclipse_intervals(times, shadow, duration_s),
+        _ground_passes(times, elevation, station.min_elevation_deg, duration_s, 0.0),
     )
 
 

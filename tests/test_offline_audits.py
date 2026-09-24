@@ -128,3 +128,50 @@ def test_counterfactual_audit_compares_model_and_simulator_responses(tmp_path, t
     assert len(metrics["response"]["science_progress"]["rmse"]) == 3
     assert 0.0 <= metrics["altered_step_fraction"] <= 1.0
     json.dumps(audit, allow_nan=False)
+
+
+def test_event_labels_measure_pass_start_duration_and_eclipse_edges(tmp_path) -> None:
+    from autops.core.event_audit import EVENTS, event_labels
+    from autops.wm.schema import EVENTSAT_STATES
+
+    trace = load_trace(_export(tmp_path / "trace.npz", [5, 6]))
+    column = {name: EVENTSAT_STATES.index(name) for name in EVENTSAT_STATES}
+    state = trace.state[0]
+    state[:] = 0.0
+    state[:, column["time_to_next_pass"]] = [2, 1, 0, 4, -1, -1, -1, -1]
+    state[:, column["physical_contact_seconds"]] = [0, 0, 30, 60, 20, 0, 0, 40]
+    state[:, column["in_sunlight"]] = [1, 1, 0, 0, 1, 1, 1, 1]
+    state[:, column["time_to_next_eclipse"]] = [2, 1, -1, -1, -1, -1, -1, -1]
+    labels = event_labels(trace)[0]
+    start, duration, entry, exit_ = (EVENTS.index(name) for name in EVENTS)
+    np.testing.assert_allclose(labels[:3, start], [2, 1, 0])
+    np.testing.assert_allclose(labels[:3, duration], [110, 110, 110])
+    assert np.isnan(labels[3, duration]) and np.isnan(labels[4, start])
+    np.testing.assert_allclose(labels[:2, entry], [2, 1])
+    np.testing.assert_allclose(labels[2:4, exit_], [2, 1])
+    assert np.isnan(labels[0, exit_])
+
+
+def test_event_audit_scores_every_method_on_shared_contexts(tmp_path, tiny_lewm) -> None:
+    from autops.core.event_audit import audit_event_timing
+
+    trace_path = _export(tmp_path / "trace.npz", [11, 12, 13, 14])
+    checkpoint = save_checkpoint(tmp_path / "model.pt", tiny_lewm(load_trace(trace_path)))
+    artifact = fit_planner_artifact(trace_path, checkpoint, tmp_path / "planner.json")["artifact"]
+    audit = audit_event_timing(
+        trace_path,
+        artifact,
+        test_trace_path=_export(tmp_path / "test.npz", [21, 22]),
+        contexts=4,
+        steps=3,
+        lookahead_steps=6,
+    )
+    assert set(audit["metrics"]) == {
+        "recurrence",
+        "physics",
+        "record-readout",
+        "latent-readout",
+        "lewm-rollout",
+    }
+    assert audit["context_count"] == 4
+    json.dumps(audit, allow_nan=False)

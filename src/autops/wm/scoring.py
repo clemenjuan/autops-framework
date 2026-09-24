@@ -191,7 +191,7 @@ def validate_planner_checkpoint(
             raise ValueError("checkpoint normalization does not match PlannerArtifact")
 
 
-def latent_rollout_readouts(
+def latent_rollout(
     model: Any,
     artifact: PlannerArtifact,
     observation_history: np.ndarray,
@@ -200,10 +200,10 @@ def latent_rollout_readouts(
     *,
     device: str = "cpu",
 ) -> np.ndarray:
-    """Roll each history forward under its command sequence and read every predicted latent.
+    """Roll each history forward under its command sequence.
 
     Histories are ``[batch, history, dim]`` and sequences ``[batch, horizon]``;
-    the result holds the frozen affine readouts as ``[batch, horizon, attribute]``.
+    the result holds the predicted latents as ``[batch, horizon, embed]``.
     """
 
     from autops.wm.jepa import require_torch
@@ -236,11 +236,30 @@ def latent_rollout_readouts(
             torch.as_tensor((future - action_mean) / action_std, device=device),
         )
     predicted = latent.detach().cpu().numpy().astype(np.float32)
+    if not np.isfinite(predicted).all():
+        raise ValueError("learned rollout contains non-finite values")
+    return predicted
+
+
+def latent_rollout_readouts(
+    model: Any,
+    artifact: PlannerArtifact,
+    observation_history: np.ndarray,
+    action_history: np.ndarray,
+    sequences: np.ndarray,
+    *,
+    device: str = "cpu",
+) -> np.ndarray:
+    """Apply the frozen affine readouts to every latent of a rollout.
+
+    The result is ``[batch, horizon, attribute]``; see ``latent_rollout``.
+    """
+
+    predicted = latent_rollout(
+        model, artifact, observation_history, action_history, sequences, device=device
+    )
     matrix = np.asarray(artifact.probe.W, dtype=np.float32)
-    readouts = predicted @ matrix.T + np.asarray(artifact.probe.b, dtype=np.float32)
-    if not np.isfinite(readouts).all():
-        raise ValueError("learned readouts contain non-finite values")
-    return readouts
+    return predicted @ matrix.T + np.asarray(artifact.probe.b, dtype=np.float32)
 
 
 def latent_candidate_attributes(
@@ -270,6 +289,7 @@ __all__ = [
     "analytical_candidate_attributes",
     "candidate_selection_metrics",
     "latent_candidate_attributes",
+    "latent_rollout",
     "latent_rollout_readouts",
     "rollout_attributes",
     "scalarization_weights",

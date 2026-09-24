@@ -397,7 +397,12 @@ sequences) through the model from the logged history and through copies of the r
 simulator. It reports how much the exogenous contact-opportunity readout moves with the
 commands, how the model's response to commands (relative to holding charging) matches the
 simulator's, and the error on steps the simulator dropped while settling or overrode for
-safety. The paper-facing
+safety. `train events` predicts the next pass start and duration and the next eclipse
+entry and exit at the same held-out contexts with an onboard recurrence (last observed
+event plus nominal orbital periods), an Eckstein-Hechler propagation of the onboard
+navigation fix with the known station, affine readouts from the latent and from the raw
+record, and thresholded visibility and sunlight readouts along the model's rollout.
+Censored events are excluded and times keep the 60 s step resolution. The paper-facing
 `board` reads only approved identities from the selected paper manifest (Paper B by
 default) and verifies the result ID, commit, configuration, and checkpoint hashes.
 Diagnostic entries remain preserved but excluded. Board generation fails closed on an

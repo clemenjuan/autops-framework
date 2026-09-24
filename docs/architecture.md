@@ -405,7 +405,15 @@ entry and exit at the same held-out contexts with an onboard recurrence (last ob
 event plus nominal orbital periods), an Eckstein-Hechler propagation of the onboard
 navigation fix with the known station, affine readouts from the latent and from the raw
 record, and thresholded visibility and sunlight readouts along the model's rollout.
-Censored events are excluded and times keep the 60 s step resolution. The paper-facing
+The rollout reports event starts and eclipse exit, but not pass duration. Eclipse
+crossings include the final predicted state; pass starts identify the preceding contact
+interval and use a strict horizon bound. Physics intervals ending at the forecast
+boundary are conservatively censored for duration/exit, because the interval format
+does not distinguish a real ending there from truncation; observed onsets are retained.
+The physics reference uses the onboard navigation timestamp and declared station and
+propagator constants, not a privileged future schedule. It is an offline event reference,
+not a closed-loop analytical planner. Censored event endings are excluded from their
+error summaries; pass-start and eclipse labels use the 60 s step resolution. The paper-facing
 `board` reads only approved identities from the selected paper manifest (Paper B by
 default) and verifies the result ID, commit, configuration, and checkpoint hashes.
 Diagnostic entries remain preserved but excluded. Board generation fails closed on an

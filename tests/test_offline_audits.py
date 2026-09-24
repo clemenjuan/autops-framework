@@ -175,3 +175,66 @@ def test_event_audit_scores_every_method_on_shared_contexts(tmp_path, tiny_lewm)
     }
     assert audit["context_count"] == 4
     json.dumps(audit, allow_nan=False)
+
+
+def test_rollout_event_scores_respect_each_event_horizon() -> None:
+    from autops.core.event_audit import _rollout_scores
+
+    truth = np.asarray(
+        [[48, np.nan, 48, 48], [49, np.nan, 49, 49], [47, np.nan, 47, 47], [47, np.nan, 47, 47]]
+    )
+    predicted = np.asarray(
+        [
+            [47, np.nan, 48, 48],
+            [47, np.nan, 48, 48],
+            [47, np.nan, 47, 47],
+            [np.inf, np.nan, np.inf, np.inf],
+        ]
+    )
+    scores = _rollout_scores(predicted, truth, horizon_min=48)
+
+    # Pass starts are floored into action intervals; eclipse edges are observed
+    # at states, including the final predicted state at the horizon.
+    assert scores["pass_start_min"] == {
+        "n_inside": 2,
+        "detection_rate": 0.5,
+        "mae": 0.0,
+        "false_alarm_rate": 1.0,
+    }
+    for name in ("eclipse_entry_min", "eclipse_exit_min"):
+        assert scores[name] == {
+            "n_inside": 3,
+            "detection_rate": pytest.approx(2 / 3),
+            "mae": 0.0,
+            "false_alarm_rate": 1.0,
+        }
+
+
+@pytest.mark.parametrize(
+    ("elevations", "shadow", "expected"),
+    [
+        (
+            [-10, 10, 10, -10, -10, 10, 20],
+            [True, True, False, False, False, True, True],
+            [0.0, 120.0, 5.0, 2.0],
+        ),
+        (
+            [-10, -10, -10, -10, -10, 10, 20],
+            [True, True, True, True, True, True, True],
+            [4.0, np.nan, np.nan, np.nan],
+        ),
+    ],
+    ids=("complete-endings-and-censored-future-onset", "censored-endings"),
+)
+def test_physics_event_endings_respect_forecast_censoring(elevations, shadow, expected) -> None:
+    from autops.core.event_audit import _interval_events
+    from autops.orbital.orekit import _eclipse_intervals, _ground_passes
+
+    times = tuple(float(step * 60) for step in range(7))
+    duration_s = times[-1]
+    eclipses = _eclipse_intervals(times, shadow, duration_s)
+    passes = _ground_passes(times, elevations, 0.0, duration_s, 0.0)
+
+    predicted = _interval_events(eclipses, passes, 60.0, duration_s)
+
+    np.testing.assert_allclose(predicted, expected, equal_nan=True)

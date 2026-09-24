@@ -130,9 +130,17 @@ def _nominal_period_steps(trace: TraceDataset) -> int:
 
 
 def _interval_events(
-    eclipses: tuple[EclipseInterval, ...], passes: tuple[GroundPass, ...], step_s: float
+    eclipses: tuple[EclipseInterval, ...],
+    passes: tuple[GroundPass, ...],
+    step_s: float,
+    duration_s: float,
 ) -> np.ndarray:
-    """Reduce forecast intervals measured from a fix to the audited events."""
+    """Reduce forecast intervals measured from a fix to the audited events.
+
+    Sampling closes open intervals at ``duration_s`` without marking them as
+    censored. Treat endings at that boundary as unknown, preserving any observed
+    onset; a real ending there cannot be distinguished from truncation.
+    """
 
     future = [item for item in passes if item.start_s > 0.0]
     entries = [item for item in eclipses if item.start_s > 0.0]
@@ -140,9 +148,9 @@ def _interval_events(
     return np.asarray(
         [
             (future[0].start_s // step_s) * step_s / 60.0 if future else np.nan,
-            future[0].duration_s if future else np.nan,
+            future[0].duration_s if future and future[0].end_s < duration_s else np.nan,
             entries[0].start_s / 60.0 if entries else np.nan,
-            shaded[0].end_s / 60.0 if shaded else np.nan,
+            shaded[0].end_s / 60.0 if shaded and shaded[0].end_s < duration_s else np.nan,
         ]
     )
 
@@ -151,6 +159,7 @@ def _physics(trace: TraceDataset, contexts: list[Context], lookahead_steps: int)
     """Propagate the onboard navigation fix of every replayed context."""
 
     step_s = trace.metadata.timestep_s
+    duration_s = lookahead_steps * step_s
     forecasts: dict[tuple[int, int], np.ndarray] = {}
     for episode in sorted({episode for episode, _, _ in contexts}):
         wanted = [step for item, step, _ in contexts if item == episode]
@@ -163,10 +172,10 @@ def _physics(trace: TraceDataset, contexts: list[Context], lookahead_steps: int)
                     fix["velocity_km_s"],
                     datetime.fromisoformat(fix["utc"]),
                     ground_station(env.config),
-                    duration_s=lookahead_steps * step_s,
+                    duration_s=duration_s,
                     sample_s=step_s,
                 )
-                forecasts[episode, step] = _interval_events(eclipses, passes, step_s)
+                forecasts[episode, step] = _interval_events(eclipses, passes, step_s, duration_s)
     return np.stack([forecasts[episode, step] for episode, step, _ in contexts])
 
 
@@ -270,7 +279,14 @@ def _rollout_scores(predicted: np.ndarray, truth: np.ndarray, horizon_min: float
         if np.isnan(predicted[:, index]).all():
             continue
         known = np.isfinite(truth[:, index]) & ~np.isnan(predicted[:, index])
-        inside = known & (truth[:, index] < horizon_min)
+        # Eclipse crossings include the final predicted state. Pass starts name
+        # the preceding contact interval, so their upper bound remains strict.
+        within = (
+            truth[:, index] <= horizon_min
+            if name.startswith("eclipse_")
+            else truth[:, index] < horizon_min
+        )
+        inside = known & within
         beyond = known & ~inside
         detected = np.isfinite(predicted[:, index])
         hits = inside & detected

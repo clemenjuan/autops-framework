@@ -1,34 +1,35 @@
 """Deterministic replay of logged EventSat trace episodes.
 
-A trace stores encoded vectors, not the raw decision records that planners and
-the simulator consume. Replaying an episode's logged requested commands from
-its launch seed rebuilds those records. Each replayed record must re-encode to
-the logged observation exactly, which rejects traces exported under other
-settings, another orbital backend, or with planning events whose energy the
-trace does not record.
+A trace stores encoded vectors, not the raw decision records and simulator
+state that planners and counterfactual checks consume. Replaying an episode's
+logged requested commands from its launch seed rebuilds them. Each replayed
+record must re-encode to the logged observation exactly, which rejects traces
+exported under other settings, another orbital backend, or with planning events
+whose energy the trace does not record.
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterable
-from typing import Any
+from copy import deepcopy
 
 import numpy as np
 
 from autops.config import expand_coordinate
 from autops.core.runner import eventsat_environment
+from autops.missions.eventsat.env import EventSatEnvironment
 from autops.missions.eventsat.observation import encode_vectors
 from autops.wm.schema import EVENTSAT_ACTIONS, TraceDataset
 
 
-def replay_records(
+def replay_environments(
     trace: TraceDataset,
     episode: int,
     steps: Iterable[int],
     *,
     planning_horizon: int = 0,
-) -> dict[int, dict[str, Any]]:
-    """Return the raw observation at each requested step of one logged episode."""
+) -> dict[int, EventSatEnvironment]:
+    """Return an independent copy of the environment at each requested step, before it acts."""
 
     if trace.metadata.mission != "eventsat":
         raise ValueError("replay supports EventSat traces")
@@ -52,16 +53,16 @@ def replay_records(
     observation = env.reset(seed)
     if env.orbit is None or env.orbit.backend != source.orbital_backend:
         raise ValueError(f"replay needs the {source.orbital_backend} orbital backend")
-    records: dict[int, dict[str, Any]] = {}
+    snapshots: dict[int, EventSatEnvironment] = {}
     for step in range(wanted[-1] + 1):
         if not np.array_equal(encode_vectors(observation)[0], trace.obs[episode, step]):
             raise ValueError(f"replay of episode {episode} diverged from the trace at step {step}")
         if step in wanted:
-            records[step] = observation
+            snapshots[step] = deepcopy(env)
         if step < wanted[-1]:
             mode = EVENTSAT_ACTIONS[int(trace.mode[episode, step])]
             observation = env.step({"eventsat_0": {"mode": mode}}).observation
-    return records
+    return snapshots
 
 
-__all__ = ["replay_records"]
+__all__ = ["replay_environments"]

@@ -8,8 +8,32 @@ from typing import Any
 
 import numpy as np
 
+from autops.wm.artifact import (
+    PlannerArtifact,
+    checkpoint_sha256,
+    load_artifact,
+    resolve_checkpoint,
+)
 from autops.wm.schema import EVENTSAT_ACTIONS, TraceDataset, load_trace, trace_sha256
-from autops.wm.training import CheckpointContract
+from autops.wm.scoring import validate_planner_checkpoint
+from autops.wm.training import CheckpointContract, load_checkpoint
+
+
+def load_planner_bundle(
+    trace_path: str | Path, artifact_path: str | Path, device: str
+) -> tuple[TraceDataset, PlannerArtifact, Any, CheckpointContract]:
+    """Load a training trace with the planner artifact and checkpoint bound to it."""
+
+    trace = load_trace(trace_path)
+    artifact = load_artifact(artifact_path)
+    if trace_sha256(trace) != artifact.model.trace_sha256:
+        raise ValueError("trace SHA-256 does not match PlannerArtifact")
+    checkpoint = resolve_checkpoint(artifact_path, artifact)
+    model, contract = load_checkpoint(checkpoint, device=device)
+    validate_planner_checkpoint(
+        artifact, contract, checkpoint_sha256(checkpoint), checkpoint.stat().st_size
+    )
+    return trace, artifact, model, contract
 
 
 def held_out(
@@ -115,6 +139,7 @@ def evaluation_record(test_trace: TraceDataset | None) -> dict[str, Any]:
 __all__ = [
     "evaluation_record",
     "held_out",
+    "load_planner_bundle",
     "near_contact",
     "planner_history",
     "sample_contexts",

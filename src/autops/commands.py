@@ -12,6 +12,7 @@ from typing import Any
 
 from autops.board.generator import build_manifest_board
 from autops.config import asset_root, expand_coordinate, parse_overrides, runtime_root
+from autops.core.counterfactual_audit import audit_action_conditioning
 from autops.core.exporter import export_traces
 from autops.core.forecast_audit import audit_recursive_forecasts
 from autops.core.probe_audit import FEATURE_FAMILIES, audit_probe_decodability
@@ -91,6 +92,12 @@ def _audit_parsers(training: Any) -> None:
     )
     _held_out_arguments(forecast, contexts=256)
     forecast.add_argument("--steps", type=int, default=48)
+    counterfactual = training.add_parser(
+        "counterfactual", help="compare model and simulator responses to counterfactual commands"
+    )
+    _held_out_arguments(counterfactual, contexts=32)
+    counterfactual.add_argument("--steps", type=int, default=12)
+    counterfactual.add_argument("--random-sequences", type=int, default=3)
 
 
 def parser() -> argparse.ArgumentParser:
@@ -273,6 +280,19 @@ def _train(args: argparse.Namespace) -> dict[str, Any]:
             output=args.output,
             contexts=args.contexts,
             steps=args.steps,
+            near_contact_fraction=args.near_contact_fraction,
+            device=args.device,
+            seed=args.seed,
+        )
+    if args.training_command == "counterfactual":
+        return audit_action_conditioning(
+            args.trace,
+            args.artifact,
+            test_trace_path=args.test_trace,
+            output=args.output,
+            contexts=args.contexts,
+            steps=args.steps,
+            random_sequences=args.random_sequences,
             near_contact_fraction=args.near_contact_fraction,
             device=args.device,
             seed=args.seed,

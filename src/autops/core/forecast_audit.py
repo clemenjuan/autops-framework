@@ -24,30 +24,26 @@ from autops.config import asset_root
 from autops.core.offline import (
     evaluation_record,
     held_out,
+    load_planner_bundle,
     near_contact,
     planner_history,
     sample_contexts,
     write_evidence,
 )
 from autops.core.provenance import collect_provenance
-from autops.core.replay import replay_records
+from autops.core.replay import replay_environments
 from autops.missions.eventsat.observation import encode_vectors, onboard_view
 from autops.wm.artifact import (
     PlannerArtifact,
     artifact_sha256,
-    checkpoint_sha256,
-    load_artifact,
-    resolve_checkpoint,
 )
 from autops.wm.guidance import project_command_prefixes
 from autops.wm.probes import DEFAULT_ATTRIBUTES, FLOW_ATTRIBUTES, build_eventsat_targets
-from autops.wm.schema import TraceDataset, load_trace, trace_sha256
+from autops.wm.schema import TraceDataset
 from autops.wm.scoring import (
     analytical_candidate_attributes,
     latent_rollout_readouts,
-    validate_planner_checkpoint,
 )
-from autops.wm.training import load_checkpoint
 
 FORECAST_SCHEMA_VERSION = "autops.forecast-audit/v1"
 
@@ -83,8 +79,8 @@ def _analytical(
     forecasts = {}
     for episode in sorted({episode for episode, _, _ in contexts}):
         wanted = [step for item, step, _ in contexts if item == episode]
-        for step, raw in replay_records(trace, episode, wanted).items():
-            state = onboard_view(encode_vectors(raw)[2])
+        for step, env in replay_environments(trace, episode, wanted).items():
+            state = onboard_view(encode_vectors(env.observe())[2])
             commands = trace.mode[episode, step : step + steps]
             projection = project_command_prefixes(state, commands)
             forecasts[episode, step] = analytical_candidate_attributes(state, projection, names)
@@ -163,15 +159,7 @@ def audit_recursive_forecasts(
     device: str = "cpu",
     seed: int = 3072,
 ) -> dict[str, Any]:
-    trace = load_trace(trace_path)
-    artifact = load_artifact(artifact_path)
-    if trace_sha256(trace) != artifact.model.trace_sha256:
-        raise ValueError("trace SHA-256 does not match PlannerArtifact")
-    checkpoint = resolve_checkpoint(artifact_path, artifact)
-    model, contract = load_checkpoint(checkpoint, device=device)
-    validate_planner_checkpoint(
-        artifact, contract, checkpoint_sha256(checkpoint), checkpoint.stat().st_size
-    )
+    trace, artifact, model, contract = load_planner_bundle(trace_path, artifact_path, device)
     evaluation, episodes = held_out(trace, test_trace_path, contract)
     if steps < 1 or steps >= evaluation.n_steps:
         raise ValueError("forecast steps must be positive and shorter than an episode")

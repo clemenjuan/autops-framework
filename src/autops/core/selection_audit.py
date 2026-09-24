@@ -27,7 +27,7 @@ from autops.core.offline import (
     write_evidence,
 )
 from autops.core.provenance import collect_provenance
-from autops.core.replay import replay_records
+from autops.core.replay import replay_environments
 from autops.representations.analytical_planner import EventSatAnalyticalCEM
 from autops.representations.cem_planner import EventSatCEMBase
 from autops.representations.wm_planner import EventSatLeWMCEM
@@ -52,13 +52,13 @@ def _score_banks(
     scores: dict[str, list[np.ndarray]] = {name: [] for name in (*planners, "random")}
     for episode in sorted({episode for episode, _, _ in contexts}):
         steps = [step for item, step, _ in contexts if item == episode]
-        records = replay_records(trace, episode, steps, planning_horizon=learned.cem.horizon)
+        snapshots = replay_environments(trace, episode, steps, planning_horizon=learned.cem.horizon)
         for step in steps:
             size = (candidates, learned.cem.horizon)
             bank = rng.integers(0, len(EVENTSAT_ACTIONS), size=size)
             history = planner_history(trace, episode, step, learned.artifact.model.history)
             for name, planner in planners.items():
-                state = planner.encode_observation(records[step])
+                state = planner.encode_observation(snapshots[step].observe())
                 scores[name].append(planner.score_requested(state, history, bank))
             scores["random"].append(rng.random(candidates))
     return {name: np.stack(values) for name, values in scores.items()}

@@ -391,8 +391,13 @@ compares the frozen readouts of every predicted latent with the labelled future:
 each step and flows as sums since the decision. The references are the readout of the
 encoded true future record, which isolates the readout's own error, persistence, and the
 planner's analytical projection of the same commands from the onboard view without
-mission-policy repair. It reports RMSE and skill against the variance across contexts. The
-paper-facing
+mission-policy repair. It reports RMSE and skill against the variance across contexts.
+`train counterfactual` rolls one set of command sequences (each mode held, plus random
+sequences) through the model from the logged history and through copies of the replayed
+simulator. It reports how much the exogenous contact-opportunity readout moves with the
+commands, how the model's response to commands (relative to holding charging) matches the
+simulator's, and the error on steps the simulator dropped while settling or overrode for
+safety. The paper-facing
 `board` reads only approved identities from the selected paper manifest (Paper B by
 default) and verifies the result ID, commit, configuration, and checkpoint hashes.
 Diagnostic entries remain preserved but excluded. Board generation fails closed on an

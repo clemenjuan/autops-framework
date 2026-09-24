@@ -9,7 +9,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from autops.wm.dataset import EpisodeSplit, episode_rows, split_episodes
-from autops.wm.schema import TraceDataset
+from autops.wm.schema import EVENTSAT_STATES, TraceDataset
 
 TARGET_DEFINITION_VERSION = "autops.eventsat.probe-targets/v3"
 
@@ -87,61 +87,52 @@ class ProbeFit:
         return (values @ self.W.T + self.b).astype(np.float32)
 
 
-def build_eventsat_targets(trace: TraceDataset, *, totals: bool = False) -> np.ndarray:
-    """Build the eight planner attributes from simulator-native EventSat state.
+def eventsat_targets(state: np.ndarray, forced: np.ndarray, *, totals: bool = False) -> np.ndarray:
+    """Build the eight planner attributes from canonical EventSat state rows.
 
-    ``totals`` reports each flow as the cumulative total it accumulates instead.
+    ``state`` is ``[..., step, EVENTSAT_STATES]`` and ``forced`` the outgoing
+    safety override of each row's command. A row stores s_t and the override of
+    a_t, but the latent at s_t is labelled with the incoming transition a_(t-1):
+    the next command was unavailable when s_t was predicted. The first row has
+    no incoming interval, so its override and flows are zero. ``totals`` reports
+    each flow as the cumulative total it accumulates instead.
     """
 
-    if trace.metadata.mission != "eventsat":
-        raise ValueError("EventSat targets require an EventSat trace")
-    index = {name: i for i, name in enumerate(trace.metadata.state_names)}
-    required = {
-        "battery_soc",
-        "contact_window_active",
-        "obc_data_mb",
-        "jetson_raw_mb",
-        "jetson_compressed_mb",
-        "data_downlinked_mb",
-        "total_observation_s",
-        "total_detections",
-        "storage_capacity_mb",
-        "health_nominal",
-    }
-    missing = required - set(index)
-    if missing:
-        raise ValueError(f"EventSat state is missing probe fields: {sorted(missing)}")
-    state = trace.state
-    capacity = state[..., index["storage_capacity_mb"]]
-    stored = sum(
-        state[..., index[name]] for name in ("obc_data_mb", "jetson_raw_mb", "jetson_compressed_mb")
-    )
-    # A trace row stores s_t and the outgoing override for a_t. The latent at
-    # s_t must be labeled with the incoming transition a_(t-1), not a future
-    # command that was unavailable when s_t was predicted. Reset has no
-    # incoming interval, so its override and flows are zero.
-    incoming_forced = np.zeros_like(trace.forced_mode)
-    incoming_forced[:, 1:] = trace.forced_mode[:, :-1]
+    index = {name: i for i, name in enumerate(EVENTSAT_STATES)}
+    values = np.asarray(state)
+    incoming_forced = np.zeros_like(forced, dtype=np.float32)
+    incoming_forced[..., 1:] = forced[..., :-1]
+
+    def column(name: str) -> np.ndarray:
+        return values[..., index[name]]
 
     def incoming(name: str) -> np.ndarray:
-        total = state[..., index[name]]
+        total = column(name)
         if totals:
             return total
         flow = np.zeros_like(total)
-        flow[:, 1:] = total[:, 1:] - total[:, :-1]
+        flow[..., 1:] = total[..., 1:] - total[..., :-1]
         return flow
 
     return eventsat_attribute_values(
-        battery_soc=state[..., index["battery_soc"]],
-        stored_mb=stored,
-        storage_capacity_mb=capacity,
+        battery_soc=column("battery_soc"),
+        stored_mb=column("obc_data_mb") + column("jetson_raw_mb") + column("jetson_compressed_mb"),
+        storage_capacity_mb=column("storage_capacity_mb"),
         downlinked_mb=incoming("data_downlinked_mb"),
         observation_s=incoming("total_observation_s"),
         detections=incoming("total_detections"),
-        communication_opportunity=state[..., index["contact_window_active"]] > 0.5,
+        communication_opportunity=column("contact_window_active") > 0.5,
         forced_mode_risk=incoming_forced,
-        health_nominal=state[..., index["health_nominal"]],
+        health_nominal=column("health_nominal"),
     )
+
+
+def build_eventsat_targets(trace: TraceDataset, *, totals: bool = False) -> np.ndarray:
+    """Build the eight planner attributes of every row of an EventSat trace."""
+
+    if trace.metadata.mission != "eventsat":
+        raise ValueError("EventSat targets require an EventSat trace")
+    return eventsat_targets(trace.state, trace.forced_mode, totals=totals)
 
 
 def objective_scale(trace: TraceDataset, episodes: Sequence[int]) -> np.ndarray:
@@ -270,6 +261,7 @@ __all__ = [
     "ProbeFit",
     "build_eventsat_targets",
     "eventsat_attribute_values",
+    "eventsat_targets",
     "fit_ridge_probe",
     "objective_scale",
     "scale_attribute_weights",

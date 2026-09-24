@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import numpy as np
@@ -7,7 +8,7 @@ import pytest
 
 from autops.config import expand_coordinate
 from autops.core.exporter import export_trace
-from autops.core.replay import replay_records
+from autops.core.replay import replay_environments
 from autops.core.selection_audit import audit_candidate_selection
 from autops.core.workflows import fit_planner_artifact
 from autops.wm.schema import load_trace, write_trace
@@ -21,12 +22,14 @@ def _export(path: Path, seeds: list[int]) -> Path:
 
 def test_replay_rebuilds_logged_records_and_detects_divergence(tmp_path) -> None:
     trace = load_trace(_export(tmp_path / "trace.npz", [5, 6]))
-    records = replay_records(trace, 1, [0, 7])
-    assert sorted(records) == [0, 7]
-    assert records[7]["step"] == 7
+    snapshots = replay_environments(trace, 1, [0, 7])
+    assert sorted(snapshots) == [0, 7]
+    assert snapshots[7].observe()["step"] == 7
+    snapshots[0].step({"eventsat_0": {"mode": "payload_observe"}})
+    assert snapshots[7].observe()["step"] == 7
     trace.mode[1, 2] = (trace.mode[1, 2] + 3) % 7
     with pytest.raises(ValueError, match="diverged from the trace at step 3"):
-        replay_records(trace, 1, [7])
+        replay_environments(trace, 1, [7])
 
 
 def test_selection_audit_scores_one_bank_per_context(tmp_path, tiny_lewm) -> None:
@@ -100,3 +103,28 @@ def test_forecast_audit_compares_rollouts_with_references(tmp_path, tiny_lewm) -
     assert max(storage["rmse"]) < 1e-5
     with pytest.raises(ValueError, match="shorter than an episode"):
         audit_recursive_forecasts(trace_path, artifact, steps=8)
+
+
+def test_counterfactual_audit_compares_model_and_simulator_responses(tmp_path, tiny_lewm) -> None:
+    from autops.core.counterfactual_audit import audit_action_conditioning
+
+    trace_path = _export(tmp_path / "trace.npz", [11, 12, 13, 14])
+    checkpoint = save_checkpoint(tmp_path / "model.pt", tiny_lewm(load_trace(trace_path)))
+    artifact = fit_planner_artifact(trace_path, checkpoint, tmp_path / "planner.json")["artifact"]
+
+    audit = audit_action_conditioning(
+        trace_path,
+        artifact,
+        test_trace_path=_export(tmp_path / "test.npz", [21, 22]),
+        contexts=3,
+        steps=3,
+        random_sequences=1,
+    )
+    assert audit["context_count"] == 3
+    assert len(audit["sequences"]) == 8
+    assert audit["sequences"][0] == ["charging"] * 3
+    metrics = audit["metrics"]
+    assert metrics["exogenous_spread"]["simulator"] == 0.0
+    assert len(metrics["response"]["science_progress"]["rmse"]) == 3
+    assert 0.0 <= metrics["altered_step_fraction"] <= 1.0
+    json.dumps(audit, allow_nan=False)

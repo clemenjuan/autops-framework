@@ -1,5 +1,5 @@
 dataset:
-  schema: autops.world_model.trace/v4
+  schema: autops.world_model.trace/v5
   history: 3
   prediction_steps: 1
 

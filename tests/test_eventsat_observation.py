@@ -190,6 +190,21 @@ def test_storage_fills_resolve_one_product_and_reach_one_only_at_capacity() -> N
     assert _vector_value(observation, "jetson_fill_log") == pytest.approx(1.0)
 
 
+def test_undetected_products_scale_by_compressed_capacity() -> None:
+    observation = _environment().reset(7)
+    metadata = _metadata(observation)
+    compressed_mb = metadata["observation_size_mb"] / metadata["compression_ratio"]
+    capacity = metadata["jetson_capacity_mb"] / compressed_mb
+    metadata.update(undetected_observations=1)
+    assert _vector_value(observation, "undetected_observations_log") > 0.05
+    # A compressed backlog above the raw-product capacity still fits on the Jetson.
+    metadata.update(undetected_observations=int(0.9 * capacity))
+    assert 0.9 < _vector_value(observation, "undetected_observations_log") < 1.0
+    # Products sent to the OBC stay undetected, so larger counts are possible; they saturate.
+    metadata.update(undetected_observations=int(3 * capacity))
+    assert _vector_value(observation, "undetected_observations_log") == 1.0
+
+
 def test_every_encoded_input_stays_within_the_declared_bounds() -> None:
     env = _environment(max_steps=240)
     space = observation_space(env.config["power"])

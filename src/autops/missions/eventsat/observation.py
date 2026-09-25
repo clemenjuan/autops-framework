@@ -124,15 +124,20 @@ def _ratio(value: float, denominator: float) -> float:
     return min(1.0, max(0.0, value / max(denominator, 1e-12)))
 
 
-def _log_fill(value_mb: float, product_mb: float, capacity_mb: float) -> float:
-    """Stored products on a log scale that reaches one only at physical capacity.
+def _log_count(products: float, capacity: float) -> float:
+    """A product count on a log scale that reaches one at ``capacity`` products.
 
     A linear capacity ratio maps one science product to ~1e-5 of Jetson storage;
     counting products logarithmically keeps first-product resolution.
     """
 
-    products = max(0.0, value_mb) / product_mb
-    return min(1.0, math.log1p(products) / math.log1p(max(1.0, capacity_mb / product_mb)))
+    return min(1.0, math.log1p(max(0.0, products)) / math.log1p(max(1.0, capacity)))
+
+
+def _log_fill(value_mb: float, product_mb: float, capacity_mb: float) -> float:
+    """Stored products on a log scale that reaches one only at physical capacity."""
+
+    return _log_count(max(0.0, value_mb) / product_mb, capacity_mb / product_mb)
 
 
 def _vector(navigation: Mapping[str, Any], key: str, scale: float) -> tuple[float, ...]:
@@ -153,7 +158,6 @@ def _observation_values(raw: Mapping[str, Any]) -> dict[str, float]:
     jetson_capacity = record_number(raw, "jetson_capacity_mb", 249036.8)
     product_mb = max(1e-12, record_number(raw, "observation_size_mb", 9.41))
     compressed_mb = product_mb / max(1e-12, record_number(raw, "compression_ratio", 5.11))
-    log_capacity = math.log1p(max(1.0, jetson_capacity / product_mb))
     raw_mb = record_number(raw, "jetson_raw_mb")
     jetson_compressed_mb = record_number(raw, "jetson_compressed_mb")
     solar = (raw.get("planning_power") or {}).get("solar_panels", {})
@@ -201,18 +205,18 @@ def _observation_values(raw: Mapping[str, Any]) -> dict[str, float]:
             jetson_compressed_mb, compressed_mb, jetson_capacity
         ),
         "health_nominal": float(raw.get("health_status", "nominal") == "nominal"),
-        "uncompressed_observations_log": math.log1p(
-            max(0.0, record_number(raw, "uncompressed_observations"))
-        )
-        / log_capacity,
+        "uncompressed_observations_log": _log_count(
+            record_number(raw, "uncompressed_observations"), jetson_capacity / product_mb
+        ),
         "compression_progress": _ratio(
             record_number(raw, "compression_progress"),
             record_number(raw, "compression_time_factor", 2.0),
         ),
-        "undetected_observations_log": math.log1p(
-            max(0.0, record_number(raw, "undetected_observations"))
-        )
-        / log_capacity,
+        # Undetected products are compressed; sending one to the OBC leaves it
+        # undetected, so the count can exceed the Jetson's compressed capacity.
+        "undetected_observations_log": _log_count(
+            record_number(raw, "undetected_observations"), jetson_capacity / compressed_mb
+        ),
         "detection_progress": _ratio(
             record_number(raw, "detection_progress"),
             record_number(raw, "detection_time_steps", 5.0),

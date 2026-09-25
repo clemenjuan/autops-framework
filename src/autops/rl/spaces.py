@@ -41,8 +41,8 @@ EVENTSAT_RL_SPEC = RLSpec(
     "eventsat",
     EVENTSAT_ACTIONS,
     EVENTSAT_OBSERVATIONS,
-    # The onboard vector of trace v4; RL shares the world model's information boundary.
-    "autops.eventsat.onboard-observation/v4",
+    # The onboard vector of trace v5; RL shares the world model's information boundary.
+    "autops.eventsat.onboard-observation/v5",
 )
 SSA_RL_SPEC = RLSpec(
     "ssa",

@@ -54,3 +54,24 @@ def test_mlp_reveals_nonlinear_xor_gap() -> None:
     assert result.mlp_r2 > 0.8
     assert result.mlp_minus_linear_r2 > 0.5
     assert result.mlp_auc == 1.0
+
+
+def test_only_zero_one_targets_are_scored_as_binary() -> None:
+    pytest.importorskip("torch")
+    rng = np.random.default_rng(5)
+    flags = rng.integers(0, 2, size=(4, 60, 1)).astype(np.float32)
+    # A science flow completes 60 s of a 3600 s hour per observing step: {0, 1/60}.
+    targets = np.concatenate([flags / 60.0, flags], axis=-1)
+    audit = compare_probe_heads(
+        flags,
+        targets,
+        attribute_names=("science_progress", "flag"),
+        episodes=EpisodeSplit((0, 1), (2, 3)),
+        hidden=(8,),
+        mlp_epochs=5,
+        seed=1,
+    )
+    science, flag = audit.attributes["science_progress"], audit.attributes["flag"]
+    assert science.positive_rate is None and science.linear_auc is None
+    assert science.linear_r2 > 0.99
+    assert 0.3 < flag.positive_rate < 0.7 and flag.linear_auc == 1.0

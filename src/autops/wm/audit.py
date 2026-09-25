@@ -253,7 +253,10 @@ def _fit_probe_predictions(
         mlp_values=prediction_mlp,
         mlp_r2=mlp_r2,
         mlp_rmse=mlp_rmse,
-        binary=tuple(np.unique(Y[..., index]).size <= 2 for index in range(len(names))),
+        # Only 0/1 flags are events; a two-valued flow such as {0, 1/60} is a quantity.
+        binary=tuple(
+            bool(np.isin(np.unique(Y[..., index]), (0.0, 1.0)).all()) for index in range(len(names))
+        ),
     )
 
 

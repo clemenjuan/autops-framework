@@ -1,8 +1,10 @@
 schema_version: autops.paper-results-manifest/v1
 paper_id: paper-a-compute-aware-planning
 
-# All earlier results predate the onboard information boundary (46-input
-# observation, forecast-free onboard planners) and are superseded. They are kept
-# privately as diagnostics, not board rows. Approve only complete reruns.
+# SpaceOps 2027 study: EventSat sas/ao symb, analytical-cem and lewm-cem, frozen at
+# e3335a3. Every earlier result predates the current onboard information boundary
+# (45-input record, trace v5, checkpoint v6, artifact v6) and is superseded; such
+# results are kept privately as diagnostics, never as board rows. Approve only
+# results of the completed campaign.
 approved_results: []
 diagnostic_results: []

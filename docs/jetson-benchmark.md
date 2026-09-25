@@ -1,7 +1,15 @@
 # Preliminary Jetson AGX planner evidence
 
+**Superseded.** Both measurements below date from July 2026 (the CEM benchmark from
+`de3c13f`), before the onboard information boundary (45-input record, trace v5,
+checkpoint v6, artifact v6) and the onboard LLM prompts. The benchmarked checkpoint,
+trace, artifact, and prompts belong to the retired contract, so these numbers describe
+that planner only and are not evidence for current models. Timing, power, and thermal
+behaviour must be measured again for the current models, and on the Jetson Orin Nano
+target, before any paper uses them.
+
 This page separates compute evidence from mission-effect evidence. The matched Jetson
-benchmark is candidate Paper A evidence for planner latency, throughput, rail energy,
+benchmark was candidate Paper A evidence for planner latency, throughput, rail energy,
 memory, and thermal behaviour. Paper B utility and M-01…M-14 remain result-document
 metrics selected by `configs/papers/paper_b.yaml`; no utility row is inferred from a
 hardware benchmark or a one-call smoke test.

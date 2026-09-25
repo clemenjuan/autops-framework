@@ -12,6 +12,10 @@ EventSat is the single-spacecraft scheduling benchmark. SSA is a prototype for a
 
 The design follows established spacecraft-operations practice and controlled autonomy comparisons, including Sellmaier et al., *Spacecraft Operations* (2022, [DOI](https://doi.org/10.1007/978-3-030-88593-9)) and Castano et al., “Operations for Autonomous Spacecraft” (2022, [DOI](https://doi.org/10.1109/AERO53065.2022.9843352)). LLM representations build on spacecraft-operator prompting and bounded language-agent architectures ([Rodriguez-Fernandez et al. 2024](https://doi.org/10.48550/arXiv.2404.00413); [Sumers et al. 2024](https://doi.org/10.48550/arXiv.2309.02427); [Yao et al. 2023](https://doi.org/10.48550/arXiv.2210.03629)).
 
+## Study status
+
+The SpaceOps 2027 study of onboard latent world-model planning is producing results. Its code is frozen at `e3335a3` and covers EventSat `sas/ao` with onboard `symb` rules, the `analytical-cem` forecast oracle, and `lewm-cem`, together with the offline prediction audits below. Commits after the freeze change only documentation and LLM, RL, SSA, and board-validation code outside that scope. Every result produced before the current onboard information boundary (45-input record, trace v5, checkpoint v6, artifact v6) is superseded. The study's manifest, `configs/papers/paper_a.yaml`, approves rows only from the completed campaign and lists none yet.
+
 ## Quick start
 
 ```bash
@@ -28,7 +32,7 @@ Experiments expand at runtime from `configs/matrix.yaml` and the mission configu
 
 Passing multiple compatible coordinates to `export` creates one mixed-policy corpus. `--episodes` and `--seeds` apply independently to every coordinate; the trace records each source coordinate, scientific configuration hash, source revision/dirty state, actual orbital backend, timestep, episode count, and seed sequence without local paths.
 
-Install `--extra rl` to train and deploy `rl` policies. `uv run autops train rl eventsat/sas/ao/rl --output runs/ppo` trains with the recipe in `configs/rl/eventsat.yaml` (`--recipe-set key=value` overrides it), writes manifest-bearing checkpoints and TensorBoard logs, and requires a W&B run like world-model training (`WANDB_PROJECT` defaults to `space-rl`). `uv run autops run eventsat/sas/ao/rl --set representation.checkpoint=runs/ppo` evaluates the checkpoint on the paired seeds.
+Install `--extra rl` to train and deploy `rl` policies. `uv run autops train rl eventsat/sas/ao/rl --output runs/ppo` trains with the recipe in `configs/rl/eventsat.yaml` (`--recipe-set key=value` overrides it), writes checkpoints whose manifests bind each policy's weight digest, plus TensorBoard logs, and requires a W&B run like world-model training (`WANDB_PROJECT` defaults to `space-rl`). `uv run autops run eventsat/sas/ao/rl --set representation.checkpoint=runs/ppo` evaluates the checkpoint on the paired seeds.
 
 Install `--extra orbital` to use Orekit's Eckstein-Hechler J2 propagation. The source repository and built wheel already include `orekit-data.zip`; source checkouts keep it at the repository root. Without Java/Orekit, AUTOPS uses its documented seeded fallback. Install `--extra llm` for live providers or use the deterministic mock in tests. Install `--extra wm` for LeWM training and learned planning.
 
@@ -38,6 +42,6 @@ World-model training requires W&B tracking. `autops train wm` defaults to the
 metrics, public-safe configuration and source hashes, the trace artifact, and the
 best-validation checkpoint; credentials remain environment- or netrc-managed.
 
-The learned-planning workflow ends with `uv run autops train evaluate TRACE --artifact PLANNER.json --output EVAL.json`. Evaluation executes complete episodes through the deployed runner on checkpoint-validation seeds (`--max-episodes N`). It records the mission configuration and actual planner diagnostics; these seeds are not an untouched test set.
+The learned-planning workflow ends with `uv run autops train evaluate TRACE --artifact PLANNER.json --output EVAL.json`. Evaluation executes complete episodes through the deployed runner on checkpoint-validation seeds (`--max-episodes N`). It records the mission configuration and actual planner diagnostics; these seeds are not an untouched test set. The offline prediction audits `train audit`, `train forecast`, `train events`, `train counterfactual`, and `train selection` score a frozen checkpoint on held-out traces; [architecture.md](docs/architecture.md) defines each.
 
 See [framework.md](docs/framework.md) for the complete matrix and metric contract, and [architecture.md](docs/architecture.md) for package boundaries and extension seams.

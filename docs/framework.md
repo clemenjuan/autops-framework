@@ -137,8 +137,9 @@ bandwidth-limited; coordination telemetry remains an idealized channel. The six 
 `payload_observe`, `payload_detect`, `isl_share`, and `safe`. Utility comes from fresh
 records delivered to ground, not omniscient simulator state. Organisation policies may
 change allocation and information routing, but never sensing, link, or target truth.
-DMAS peers are strictly local by default, and hosted CMAS and HMAS agents reach other
-satellites only over physical ISL links (see [architecture](architecture.md)).
+IMAS agents have no inter-satellite links, DMAS peers are strictly local by default, and
+hosted CMAS and HMAS agents reach other satellites only over physical ISL links (see
+[architecture](architecture.md)).
 SSA runs `rl` under every organisation: one RLlib agent per organisation agent, each
 commanding its satellites from its scoped view with a local vector per satellite. That
 vector keeps the agentic framework's feature order on the lean SSA telemetry, adds the
@@ -173,7 +174,7 @@ reported for every metric; M-09 is computed across paired episodes.
 | M-01 | utility | weighted, duration-scaled observation/downlink objective minus anomaly penalty |
 | M-02 | mean AoI | mean seconds since the last productive downlink |
 | M-03 | peak AoI | maximum seconds since the last productive downlink |
-| M-04 | recovery | mean control steps from anomaly arrival to nominal, non-safe operation |
+| M-04 | recovery | mean control steps from anomaly arrival to nominal, non-safe operation, over completed recoveries (0 when none completes) |
 | M-05 | safety-override rate | fraction of satellite-steps resolved to safety `safe` |
 | M-06 | resource efficiency | M-01 divided by gross energy consumed in Wh |
 | M-07 | decision latency | mean latency over permitted inference decisions |
@@ -189,8 +190,9 @@ Every board row retains the sample count. Metrics are computed by the mission co
 never reconstructed by board code.
 
 Hardware timing, rail power, and thermal measurements are not M-01…M-14 mission
-metrics and therefore do not enter board columns. The current Jetson evidence and its
-run identities are reported separately in [Jetson planner evidence](jetson-benchmark.md).
+metrics and therefore do not enter board columns. Jetson measurements and their run
+identities are reported separately in [Jetson planner evidence](jetson-benchmark.md); the
+recorded ones predate the current onboard information boundary and are superseded.
 
 ## Fairness and reproducibility
 

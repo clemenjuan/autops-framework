@@ -148,8 +148,11 @@ no pass or remaining-capacity forecast. Onboard LLM prompts state that no pass o
 eclipse forecast exists and report present station visibility, elevation, sunlight,
 settling, and the last interval's outcome. Their what-if tools treat communication
 before visibility as feasible antenna prepointing without transfer and scale value by
-one step of link capacity. Their symbolic shield admits communication with OBC data
-waiting, matching the CEM mask. Ground roles legitimately keep the pass almanac, and
+one step of link capacity. In every role the what-if tools apply each mode's own battery
+threshold and report the slew of the mode the environment resolves, so a request replaced
+by charging slews as charging; each agentic follow-up turn restates the planning event's
+telemetry together with every earlier tool result. Their symbolic shield admits
+communication with OBC data waiting, matching the CEM mask. Ground roles legitimately keep the pass almanac, and
 `analytical-cem` keeps it as an oracle (see below).
 
 The symbolic ground scheduler caps science production by the next pass. It sizes new
@@ -305,7 +308,7 @@ reported. `logical` gating makes every link available, as in the agentic organis
 | Token | Agents | Commands | Sees |
 |---|---|---|---|
 | `sas` | `central_agent`, not hosted | every satellite | every satellite |
-| `imas` | `sat_agent_i` on satellite i | its satellite | its satellite |
+| `imas` | `sat_agent_i` on satellite i | its satellite | its satellite; empty agent graph, so no ISL |
 | `dmas` | `sat_agent_i` on satellite i | its satellite | its satellite (`peer_view: local`); with `linked`, also linked neighbours |
 | `cmas` | `mission_manager` on the first satellite | every satellite over links | satellites linked to its host |
 | `hmas` | `cluster_agent_i` on its cluster's first satellite | its cluster over links | cluster members linked to its host |
@@ -348,9 +351,12 @@ declares the catalog size, custody tau, and orbital period in every record so ea
 carries its own normalisation. Agents sharing a policy must have identical spaces;
 unequal HMAS clusters use `policy_sharing: independent_per_agent`.
 Every checkpoint, including intermediate `step_<sampled steps>` snapshots, carries a
-manifest with the observation schema and names, per-policy spaces, recipe, and
-public-safe provenance; loading rejects any other contract, and results record the
-deployed policy's identity. Mock-policy results are never boardable.
+manifest (schema v2) with the observation schema and names, per-policy spaces and weight
+digests, recipe, an allowlisted training summary, and public-safe provenance. Loading
+rejects any other contract and any policy whose files no longer match their digest, and
+caches each restored policy under that digest. Results record the deployed policy's
+identity, digests included, and SSA result hashes cover it. Mock-policy results are never
+boardable.
 
 ## Commands and runtime data
 
@@ -363,6 +369,7 @@ uv run autops train rl COORDINATE --output DIR [--recipe-set key=value]
 uv run autops train probes ...
 uv run autops train evaluate TRACE --artifact PLANNER.json --output EVAL.json
 uv run autops train audit ...
+uv run autops train forecast|events|counterfactual|selection ...
 uv run autops board [--manifest PATH] [--output PATH]
 ```
 
@@ -418,7 +425,8 @@ error summaries; pass-start and eclipse labels use the 60 s step resolution. The
 default) and verifies the result ID, commit, configuration, and checkpoint hashes.
 Diagnostic entries remain preserved but excluded. Board generation fails closed on an
 empty approval list or on incomplete, non-finite, duplicate, mismatched, or
-provenance-free results. Mission utility and M-01…M-14 belong on that results board;
+provenance-free results, `rl` results without a trained checkpoint, and LLM results from
+the deterministic mock or canned replay responses. Mission utility and M-01…M-14 belong on that results board;
 hardware latency, rail energy, and thermal evidence use the separate, provenance-bearing
 [Jetson planner evidence](jetson-benchmark.md) table rather than inventing mission
 metrics.

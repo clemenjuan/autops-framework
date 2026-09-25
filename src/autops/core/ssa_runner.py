@@ -105,7 +105,8 @@ def run_ssa_experiment(spec: ExperimentSpec) -> dict[str, Any]:
         "metrics": mean_metrics,
         "statistics": statistics,
         "episodes": episodes,
-        "provenance": collect_provenance(spec.model_dump(mode="json"), asset_root()),
+        # Hash the published experiment, including any policy identity added above.
+        "provenance": collect_provenance(experiment, asset_root()),
     }
 
 

@@ -81,10 +81,12 @@ def test_forecast_audit_compares_rollouts_with_references(tmp_path, tiny_lewm) -
     checkpoint = save_checkpoint(tmp_path / "model.pt", tiny_lewm(load_trace(trace_path)))
     artifact = fit_planner_artifact(trace_path, checkpoint, tmp_path / "planner.json")["artifact"]
 
+    output = tmp_path / "forecast.json"
     audit = audit_recursive_forecasts(
         trace_path,
         artifact,
         test_trace_path=_export(tmp_path / "test.npz", [21, 22]),
+        output=output,
         contexts=4,
         steps=3,
     )
@@ -101,21 +103,20 @@ def test_forecast_audit_compares_rollouts_with_references(tmp_path, tiny_lewm) -
     storage = methods["analytical-projection"]["storage_margin"]
     assert len(storage["rmse"]) == 3
     assert max(storage["rmse"]) < 1e-5
-    rows = audit["contexts"]
-    assert len(rows) == 4 and {row["seed"] for row in rows} <= {21, 22}
-    assert all(set(row["forecasts"]) == set(methods) for row in rows)
-    column = list(audit["attributes"]).index("storage_margin")
-    errors = np.asarray(
-        [
-            np.asarray(row["forecasts"]["persistence"])[:, column]
-            - np.asarray(row["truth"])[:, column]
-            for row in rows
-        ]
-    )
-    np.testing.assert_allclose(
-        np.sqrt(np.mean(errors**2, axis=0)), methods["persistence"]["storage_margin"]["rmse"]
-    )
     json.dumps(audit, allow_nan=False)
+
+    # The written evidence alone must tie every context value to its attribute.
+    evidence = json.loads(output.read_text(encoding="utf-8"))
+    names = evidence["attribute_names"]
+    assert set(names) == set(evidence["attributes"]) and names != sorted(names)
+    rows = evidence["contexts"]
+    assert len(rows) == 4 and {row["seed"] for row in rows} <= {21, 22}
+    truth = np.asarray([row["truth"] for row in rows], dtype=float)
+    for method, scores in evidence["metrics"]["all"].items():
+        forecast = np.asarray([row["forecasts"][method] for row in rows], dtype=float)
+        rmse = np.sqrt(np.mean((forecast - truth) ** 2, axis=0))
+        for column, name in enumerate(names):
+            np.testing.assert_allclose(rmse[:, column], scores[name]["rmse"])
     with pytest.raises(ValueError, match="shorter than an episode"):
         audit_recursive_forecasts(trace_path, artifact, steps=8)
 

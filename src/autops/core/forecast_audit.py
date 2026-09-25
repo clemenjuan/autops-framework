@@ -11,7 +11,8 @@ planner's analytical projection of the same commands with present visibility
 and persistent sunlight, without mission-policy repair. Per method, attribute
 and step, the audit reports RMSE and the skill 1 - MSE/Var across contexts,
 overall and split by proximity to contact. Each context row keeps the truth and
-every forecast as ``[step][attribute]``, so intervals can resample physical seeds.
+every forecast as ``[step][attribute]``, attributes in ``attribute_names`` order,
+so intervals can resample physical seeds.
 """
 
 from __future__ import annotations
@@ -48,7 +49,7 @@ from autops.wm.scoring import (
     latent_rollout_readouts,
 )
 
-FORECAST_SCHEMA_VERSION = "autops.forecast-audit/v2"
+FORECAST_SCHEMA_VERSION = "autops.forecast-audit/v3"
 
 
 def _accumulate(values: np.ndarray, flows: list[int]) -> np.ndarray:
@@ -197,6 +198,7 @@ def audit_recursive_forecasts(
             "artifact_sha256": artifact_sha256(artifact),
             "checkpoint_sha256": artifact.model.checkpoint_sha256,
             "evaluation": evaluation_record(None if test_trace_path is None else evaluation),
+            "attribute_names": list(names),
             "attributes": {name: "flow" if name in FLOW_ATTRIBUTES else "stock" for name in names},
             "config": settings,
             "provenance": collect_provenance(settings, asset_root()),

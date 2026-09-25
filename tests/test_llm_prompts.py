@@ -17,6 +17,7 @@ from autops.llm.onboard_prompts import (
 )
 from autops.llm.tools import (
     SCHEDULE_TOOL_NAMES,
+    _get_feasible_modes,
     check_constraints,
     evaluate_plan,
     get_tool_schemas,
@@ -131,3 +132,18 @@ def test_forced_prompt_removes_tool_option() -> None:
     assert "tool budget is exhausted" in prompt
     assert "tool calls are not available" in prompt
     assert '"decision"' in prompt
+
+
+def test_what_if_tools_apply_each_mode_battery_threshold() -> None:
+    state = {
+        "battery_soc": 0.38,
+        "previous_mode": "payload_observe",
+        "mode_constraints": {"payload_observe": {"min_battery_soc": 0.4}},
+    }
+    # The environment would substitute charging below the observation threshold.
+    below = check_constraints(state, "payload_observe")
+    assert not below["feasible"] and not below["productive_this_step"]
+    assert [item["constraint"] for item in below["violations"]] == ["mode_battery"]
+    assert "payload_observe" not in _get_feasible_modes(state)
+    above = check_constraints({**state, "battery_soc": 0.41}, "payload_observe")
+    assert above["feasible"] and above["productive_this_step"]

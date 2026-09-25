@@ -64,16 +64,16 @@ def _get_pipeline_bottleneck(state: dict[str, Any]) -> str:
     return "none"
 
 
-def check_constraints(state: dict[str, Any], proposed_mode: str = "charging") -> dict[str, Any]:
-    """Validate a candidate against declared telemetry, without changing state."""
+def _battery_and_health(
+    state: dict[str, Any], proposed_mode: str
+) -> tuple[list[dict[str, str]], list[dict[str, str]], bool]:
+    """Violations, warnings and whether the mode's own battery threshold blocks it."""
 
     violations: list[dict[str, str]] = []
     warnings: list[dict[str, str]] = []
     soc = record_number(state, "battery_soc", 0.5)
     health = str(state.get("health_status", "nominal"))
     hard_soc = record_number(state, "battery_min_soc", 0.20)
-    productive = True
-
     if proposed_mode not in MODES:
         violations.append({"constraint": "mode", "reason": "Unknown EventSat mode."})
     if health != "nominal" and proposed_mode != "safe":
@@ -87,11 +87,77 @@ def check_constraints(state: dict[str, Any], proposed_mode: str = "charging") ->
                 "reason": f"SoC {soc:.2f} is at/below the hard limit {hard_soc:.2f}.",
             }
         )
+    threshold = (state.get("mode_constraints") or {}).get(proposed_mode, {})
+    minimum = record_number(threshold, "min_battery_soc", 0.0)
+    # Below a mode's own threshold the environment substitutes charging.
+    below_threshold = soc > hard_soc and health == "nominal" and soc < minimum
+    if below_threshold:
+        violations.append(
+            {
+                "constraint": "mode_battery",
+                "reason": f"SoC {soc:.2f} is below the {proposed_mode} threshold {minimum:.2f}.",
+            }
+        )
     if 0.20 < soc < 0.35 and proposed_mode not in {"charging", "safe"}:
         warnings.append(
             {"constraint": "battery_preferred", "reason": "SoC is below the preferred 0.35."}
         )
-    settling = _settling(state, proposed_mode, safety_forced=health != "nominal" or soc <= hard_soc)
+    return violations, warnings, below_threshold
+
+
+def _mode_progress(
+    state: dict[str, Any],
+    proposed_mode: str,
+    violations: list[dict[str, str]],
+    warnings: list[dict[str, str]],
+) -> bool:
+    """Whether the mode advances the pipeline now, adding its own findings."""
+
+    if proposed_mode == "communication":
+        if _has_almanac(state):
+            contact = bool(state.get("ground_pass_active", False))
+            if not contact or record_number(state, "contact_window_seconds", 0.0) <= 0:
+                violations.append(
+                    {"constraint": "ground_pass", "reason": "No positive contact window is active."}
+                )
+        elif not state.get("station_visible", False):
+            warnings.append(
+                {
+                    "constraint": "station_visibility",
+                    "reason": "Station not visible now; communication only points the antenna.",
+                }
+            )
+            return False
+        return record_number(state, "obc_data_mb", 0.0) > 0
+    if proposed_mode == "payload_observe":
+        capacity = record_number(state, "jetson_capacity_mb", 249036.8)
+        stored = record_number(state, "jetson_raw_mb", 0.0) + record_number(
+            state, "jetson_compressed_mb", 0.0
+        )
+        fits = stored + record_number(state, "observation_size_mb", 9.41) <= capacity
+        if not fits:
+            violations.append(
+                {"constraint": "jetson_capacity", "reason": "A complete product would not fit."}
+            )
+        return fits
+    if proposed_mode == "payload_compress":
+        return record_number(state, "uncompressed_observations", 0.0) >= 1
+    if proposed_mode == "payload_detect":
+        return record_number(state, "undetected_observations", 0.0) >= 1
+    if proposed_mode == "payload_send":
+        return record_number(state, "jetson_compressed_mb", 0.0) > 0
+    return True
+
+
+def check_constraints(state: dict[str, Any], proposed_mode: str = "charging") -> dict[str, Any]:
+    """Validate a candidate against declared telemetry, without changing state."""
+
+    violations, warnings, below_threshold = _battery_and_health(state, proposed_mode)
+    soc = record_number(state, "battery_soc", 0.5)
+    safety_forced = str(state.get("health_status", "nominal")) != "nominal" or soc <= (
+        record_number(state, "battery_min_soc", 0.20)
+    )
+    settling = _settling(state, proposed_mode, safety_forced=safety_forced)
     if settling["command_ignored"]:
         # An ongoing slew keeps its initial target: the command is ignored, not queued,
         # and therefore neither a violation beyond an invalid mode nor productive.
@@ -103,40 +169,8 @@ def check_constraints(state: dict[str, Any], proposed_mode: str = "charging") ->
             "violations": [item for item in violations if item["constraint"] == "mode"],
             "warnings": [_settling_warning(settling)],
         }
-
-    if proposed_mode == "communication":
-        productive = record_number(state, "obc_data_mb", 0.0) > 0
-        if _has_almanac(state):
-            contact = bool(state.get("ground_pass_active", False))
-            if not contact or record_number(state, "contact_window_seconds", 0.0) <= 0:
-                violations.append(
-                    {"constraint": "ground_pass", "reason": "No positive contact window is active."}
-                )
-        elif not state.get("station_visible", False):
-            productive = False
-            warnings.append(
-                {
-                    "constraint": "station_visibility",
-                    "reason": "Station not visible now; communication only points the antenna.",
-                }
-            )
-    elif proposed_mode == "payload_observe":
-        capacity = record_number(state, "jetson_capacity_mb", 249036.8)
-        stored = record_number(state, "jetson_raw_mb", 0.0) + record_number(
-            state, "jetson_compressed_mb", 0.0
-        )
-        productive = stored + record_number(state, "observation_size_mb", 9.41) <= capacity
-        if not productive:
-            violations.append(
-                {"constraint": "jetson_capacity", "reason": "A complete product would not fit."}
-            )
-    elif proposed_mode == "payload_compress":
-        productive = record_number(state, "uncompressed_observations", 0.0) >= 1
-    elif proposed_mode == "payload_detect":
-        productive = record_number(state, "undetected_observations", 0.0) >= 1
-    elif proposed_mode == "payload_send":
-        productive = record_number(state, "jetson_compressed_mb", 0.0) > 0
-
+    productive = _mode_progress(state, proposed_mode, violations, warnings)
+    productive = productive and not below_threshold
     if settling["transition_steps_required"]:
         productive = False
         warnings.append(_settling_warning(settling))

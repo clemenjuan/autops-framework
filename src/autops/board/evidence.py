@@ -416,6 +416,18 @@ def _validate_provenance(provenance: Any, experiment: dict[str, Any], source: Pa
         raise ValueError(f"{source}: result lacks runtime provenance")
 
 
+def _reject_substitute_llm(episodes: list[Any], source: Path) -> None:
+    """Deterministic mock and canned replay responses exercise software, not models."""
+
+    for episode in episodes:
+        for diagnostics in (episode.get("decision_diagnostics") or {}).values():
+            llm = diagnostics.get("llm_provenance") if isinstance(diagnostics, dict) else None
+            if llm is None:
+                continue
+            if not isinstance(llm, dict) or llm.get("mock") is not False or llm.get("replay"):
+                raise ValueError(f"{source}: mock or replayed llm responses are not evidence")
+
+
 def _validate_episode_seeds(
     experiment: dict[str, Any], episodes: list[dict[str, Any]], source: Path
 ) -> None:
@@ -466,6 +478,7 @@ def validate_result_document(payload: Any, source: Path) -> ValidatedResult:
     uses_rl = "rl" in {experiment.get("representation"), experiment.get("onboard_representation")}
     if uses_rl and (experiment.get("rl_policy_identity") or {}).get("source") != "checkpoint":
         raise ValueError(f"{source}: rl results require a trained checkpoint identity")
+    _reject_substitute_llm(episodes, source)
 
     metrics = _finite_mapping(payload.get("metrics"), source, "metric")
     means = _finite_mapping(statistics.get("mean"), source, "statistics.mean")

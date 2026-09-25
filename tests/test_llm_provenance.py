@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from autops.config import expand_coordinate
 from autops.core.runner import ExperimentRunner
 
@@ -44,3 +46,16 @@ def test_ao_llm_runner_records_held_actions_and_planner_compute() -> None:
     assert diagnostics["planning_events"] == 1
     assert diagnostics["held_action_steps"] == 2
     assert episode["planner_compute_energy_wh"] > 0.0
+
+
+def test_mock_llm_results_are_not_publication_evidence(tmp_path) -> None:
+    from autops.board.evidence import validate_result_document
+
+    spec = expand_coordinate(
+        "eventsat/sas/ag/llm-s",
+        steps=5,
+        overrides={"representation": {"llm_mock": True}},
+    )
+    result = ExperimentRunner(spec, save=False, prefer_orekit=False).run()
+    with pytest.raises(ValueError, match="mock or replayed llm responses"):
+        validate_result_document(result, tmp_path / "result.json")

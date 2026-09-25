@@ -103,6 +103,16 @@ def _collector() -> EventSatMetrics:
     return collector
 
 
+def test_recovery_averages_only_anomalies_that_recovered() -> None:
+    collector = EventSatMetrics(CONFIG, max_steps=7, timestep_s=60.0)
+    active = [True, True, False, True, True, True, True]
+    for step, flag in enumerate(active):
+        event = "thermal_warning" if step in (0, 3) else None
+        collector.record({"anomaly_event": event, "anomaly_active": flag})
+    # The second anomaly never reached nominal operation, so it has no recovery time.
+    assert collector.aggregate()["mean_recovery_steps"] == 2.0
+
+
 def test_metric_registry_and_direct_m01_to_m14_formulas() -> None:
     metrics = _collector().aggregate()
     assert set(METRIC_IDS) == {f"M-{index:02d}" for index in range(1, 15)}

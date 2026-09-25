@@ -151,6 +151,12 @@ class EventSatMetrics:
         return mean(values), max(values)
 
     def _recovery_steps(self) -> list[int]:
+        """Steps from each anomaly's arrival to nominal, non-safe operation.
+
+        An anomaly still active when the episode ends has not recovered, so it
+        contributes no recovery time rather than its censored duration.
+        """
+
         start: int | None = None
         durations: list[int] = []
         for index, row in enumerate(self.rows):
@@ -164,8 +170,6 @@ class EventSatMetrics:
             ):
                 durations.append(index - start)
                 start = None
-        if start is not None:
-            durations.append(len(self.rows) - start)
         return durations
 
     def _command_count(self) -> int:

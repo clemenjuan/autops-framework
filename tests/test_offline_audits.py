@@ -101,6 +101,21 @@ def test_forecast_audit_compares_rollouts_with_references(tmp_path, tiny_lewm) -
     storage = methods["analytical-projection"]["storage_margin"]
     assert len(storage["rmse"]) == 3
     assert max(storage["rmse"]) < 1e-5
+    rows = audit["contexts"]
+    assert len(rows) == 4 and {row["seed"] for row in rows} <= {21, 22}
+    assert all(set(row["forecasts"]) == set(methods) for row in rows)
+    column = list(audit["attributes"]).index("storage_margin")
+    errors = np.asarray(
+        [
+            np.asarray(row["forecasts"]["persistence"])[:, column]
+            - np.asarray(row["truth"])[:, column]
+            for row in rows
+        ]
+    )
+    np.testing.assert_allclose(
+        np.sqrt(np.mean(errors**2, axis=0)), methods["persistence"]["storage_margin"]["rmse"]
+    )
+    json.dumps(audit, allow_nan=False)
     with pytest.raises(ValueError, match="shorter than an episode"):
         audit_recursive_forecasts(trace_path, artifact, steps=8)
 
@@ -127,6 +142,13 @@ def test_counterfactual_audit_compares_model_and_simulator_responses(tmp_path, t
     assert metrics["exogenous_spread"]["simulator"] == 0.0
     assert len(metrics["response"]["science_progress"]["rmse"]) == 3
     assert 0.0 <= metrics["altered_step_fraction"] <= 1.0
+    rows = audit["contexts"]
+    shape = (8, 3, len(audit["attributes"]))
+    assert len(rows) == 3 and {row["seed"] for row in rows} <= {21, 22}
+    assert all(np.asarray(row["model"]).shape == shape for row in rows)
+    assert all(np.asarray(row["simulator"]).shape == shape for row in rows)
+    altered = np.asarray([row["altered"] for row in rows])
+    assert altered.mean() == pytest.approx(metrics["altered_step_fraction"])
     json.dumps(audit, allow_nan=False)
 
 
@@ -153,7 +175,7 @@ def test_event_labels_measure_pass_start_duration_and_eclipse_edges(tmp_path) ->
 
 
 def test_event_audit_scores_every_method_on_shared_contexts(tmp_path, tiny_lewm) -> None:
-    from autops.core.event_audit import audit_event_timing
+    from autops.core.event_audit import EVENTS, audit_event_timing
 
     trace_path = _export(tmp_path / "trace.npz", [11, 12, 13, 14])
     checkpoint = save_checkpoint(tmp_path / "model.pt", tiny_lewm(load_trace(trace_path)))
@@ -174,6 +196,18 @@ def test_event_audit_scores_every_method_on_shared_contexts(tmp_path, tiny_lewm)
         "lewm-rollout",
     }
     assert audit["context_count"] == 4
+    assert audit["events"] == list(EVENTS)
+    rows = audit["contexts"]
+    assert len(rows) == 4 and {row["seed"] for row in rows} <= {21, 22}
+    assert all(set(row["predictions"]) == set(audit["metrics"]) for row in rows)
+    duration = EVENTS.index("pass_duration_s")
+    assert all(row["predictions"]["lewm-rollout"][duration] is None for row in rows)
+    start = EVENTS.index("pass_start_min")
+    scored = sum(
+        row["truth"][start] is not None and row["predictions"]["physics"][start] is not None
+        for row in rows
+    )
+    assert scored == audit["metrics"]["physics"]["pass_start_min"]["n"]
     json.dumps(audit, allow_nan=False)
 
 

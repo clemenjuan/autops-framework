@@ -17,7 +17,9 @@ events (beyond the recorded episode) are excluded.
   event is the first crossing inside the rollout; later events count as missed.
 
 Times are minutes at the 60 s step resolution; a pass shorter than a step can
-fall between samples.
+fall between samples. Each context row keeps the labels and every method's
+prediction in ``EVENTS`` order; ``None`` marks a censored or undefined value, and
+for the rollout also an event it did not reach.
 """
 
 from __future__ import annotations
@@ -30,7 +32,9 @@ import numpy as np
 
 from autops.config import asset_root, expand_coordinate
 from autops.core.offline import (
+    context_record,
     evaluation_record,
+    finite_values,
     held_out,
     load_planner_bundle,
     near_contact,
@@ -49,7 +53,7 @@ from autops.wm.probes import affine_readout
 from autops.wm.schema import EVENTSAT_OBSERVATIONS, TraceDataset
 from autops.wm.scoring import latent_rollout
 
-EVENT_SCHEMA_VERSION = "autops.event-timing-audit/v1"
+EVENT_SCHEMA_VERSION = "autops.event-timing-audit/v2"
 EVENTS = ("pass_start_min", "pass_duration_s", "eclipse_entry_min", "eclipse_exit_min")
 Context = tuple[int, int, bool]
 
@@ -303,11 +307,52 @@ def _rollout_scores(predicted: np.ndarray, truth: np.ndarray, horizon_min: float
 
 
 def _metrics(
-    methods: dict[str, np.ndarray], rollout: np.ndarray, truth: np.ndarray, horizon_min: float
+    methods: dict[str, np.ndarray], truth: np.ndarray, horizon_min: float
 ) -> dict[str, Any]:
     return {
-        **{name: _timing_scores(values, truth) for name, values in methods.items()},
-        "lewm-rollout": _rollout_scores(rollout, truth, horizon_min),
+        name: _rollout_scores(values, truth, horizon_min)
+        if name == "lewm-rollout"
+        else _timing_scores(values, truth)
+        for name, values in methods.items()
+    }
+
+
+def _predictions(
+    model: Any,
+    artifact: Any,
+    trace: TraceDataset,
+    evaluation: TraceDataset,
+    contexts: list[Context],
+    train: tuple[int, ...],
+    steps: int,
+    lookahead_steps: int,
+    device: str,
+) -> dict[str, np.ndarray]:
+    """Every method's event times ``[context, EVENTS]`` at the sampled contexts."""
+
+    at = (
+        np.asarray([episode for episode, _, _ in contexts]),
+        np.asarray([step for _, step, _ in contexts]),
+    )
+    normalizer = artifact.normalization
+    obs_mean, obs_std = np.asarray(normalizer.obs_mean), np.asarray(normalizer.obs_std)
+    labels = event_labels(trace)
+    period = _nominal_period_steps(evaluation)
+    return {
+        "recurrence": np.stack(
+            [_recurrence(evaluation, episode, step, period) for episode, step, _ in contexts]
+        ),
+        "physics": _physics(evaluation, contexts, lookahead_steps),
+        "record-readout": _readouts(trace.obs, labels, train, evaluation.obs[at]),
+        "latent-readout": _readouts(
+            _latent_features(model, (trace.obs - obs_mean) / obs_std, device),
+            labels,
+            train,
+            _latent_features(model, (evaluation.obs[at] - obs_mean) / obs_std, device),
+        ),
+        "lewm-rollout": _rollout_events(
+            model, artifact, trace, evaluation, contexts, train, steps, device
+        ),
     }
 
 
@@ -336,30 +381,20 @@ def audit_event_timing(
         np.random.default_rng(seed),
         last_step=evaluation.n_steps - steps - 1,
     )
-    at = (
-        np.asarray([episode for episode, _, _ in sampled]),
-        np.asarray([step for _, step, _ in sampled]),
+    methods = _predictions(
+        model,
+        artifact,
+        trace,
+        evaluation,
+        sampled,
+        contract.episodes.train,
+        steps,
+        lookahead_steps,
+        device,
     )
-    train = contract.episodes.train
-    normalizer = artifact.normalization
-    obs_mean, obs_std = np.asarray(normalizer.obs_mean), np.asarray(normalizer.obs_std)
-    labels = event_labels(trace)
-    orbital_period = _nominal_period_steps(evaluation)
-    methods = {
-        "recurrence": np.stack(
-            [_recurrence(evaluation, episode, step, orbital_period) for episode, step, _ in sampled]
-        ),
-        "physics": _physics(evaluation, sampled, lookahead_steps),
-        "record-readout": _readouts(trace.obs, labels, train, evaluation.obs[at]),
-        "latent-readout": _readouts(
-            _latent_features(model, (trace.obs - obs_mean) / obs_std, device),
-            labels,
-            train,
-            _latent_features(model, (evaluation.obs[at] - obs_mean) / obs_std, device),
-        ),
-    }
-    rollout = _rollout_events(model, artifact, trace, evaluation, sampled, train, steps, device)
-    truth = event_labels(evaluation)[at]
+    truth = event_labels(evaluation)[
+        [episode for episode, _, _ in sampled], [step for _, step, _ in sampled]
+    ]
     settings = {
         "contexts": contexts,
         "steps": steps,
@@ -378,7 +413,18 @@ def audit_event_timing(
             "config": settings,
             "provenance": collect_provenance(settings, asset_root()),
             "context_count": len(sampled),
-            "metrics": _metrics(methods, rollout, truth, steps * minutes),
+            "metrics": _metrics(methods, truth, steps * minutes),
+            "events": list(EVENTS),
+            "contexts": [
+                {
+                    **context_record(evaluation, context),
+                    "truth": finite_values(truth[index]),
+                    "predictions": {
+                        name: finite_values(values[index]) for name, values in methods.items()
+                    },
+                }
+                for index, context in enumerate(sampled)
+            ],
         },
     )
 

@@ -10,7 +10,9 @@ which is zero. The response to commands (each sequence minus holding charging)
 is compared with the simulator's response per attribute and step. Steps where
 the simulator dropped or overrode the request, while settling or for safety,
 are scored apart, so predicting the requested rather than the executed outcome
-shows up.
+shows up. Each context row keeps the model and simulator values as
+``[sequence][step][attribute]`` and the altered-step flags, so intervals can
+resample physical seeds.
 """
 
 from __future__ import annotations
@@ -23,7 +25,9 @@ import numpy as np
 
 from autops.config import asset_root
 from autops.core.offline import (
+    context_record,
     evaluation_record,
+    finite_values,
     held_out,
     load_planner_bundle,
     near_contact,
@@ -39,7 +43,7 @@ from autops.wm.probes import DEFAULT_ATTRIBUTES, eventsat_targets
 from autops.wm.schema import EVENTSAT_ACTIONS, TraceDataset
 from autops.wm.scoring import latent_rollout_readouts
 
-COUNTERFACTUAL_SCHEMA_VERSION = "autops.counterfactual-audit/v1"
+COUNTERFACTUAL_SCHEMA_VERSION = "autops.counterfactual-audit/v2"
 _CHARGING = EVENTSAT_ACTIONS.index("charging")
 
 
@@ -200,6 +204,16 @@ def audit_action_conditioning(
             "provenance": collect_provenance(settings, asset_root()),
             "context_count": len(sampled),
             "metrics": _metrics(model_values, truth, altered, artifact.probe.attribute_names),
+            "attributes": list(artifact.probe.attribute_names),
+            "contexts": [
+                {
+                    **context_record(evaluation, context),
+                    "model": finite_values(model_values[index]),
+                    "simulator": finite_values(truth[index]),
+                    "altered": altered[index].tolist(),
+                }
+                for index, context in enumerate(sampled)
+            ],
         },
     )
 

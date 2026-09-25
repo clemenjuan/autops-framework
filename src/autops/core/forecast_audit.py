@@ -10,7 +10,8 @@ error; persistence (stocks hold, flows repeat the last interval); and the
 planner's analytical projection of the same commands with present visibility
 and persistent sunlight, without mission-policy repair. Per method, attribute
 and step, the audit reports RMSE and the skill 1 - MSE/Var across contexts,
-overall and split by proximity to contact.
+overall and split by proximity to contact. Each context row keeps the truth and
+every forecast as ``[step][attribute]``, so intervals can resample physical seeds.
 """
 
 from __future__ import annotations
@@ -22,7 +23,9 @@ import numpy as np
 
 from autops.config import asset_root
 from autops.core.offline import (
+    context_record,
     evaluation_record,
+    finite_values,
     held_out,
     load_planner_bundle,
     near_contact,
@@ -45,7 +48,7 @@ from autops.wm.scoring import (
     latent_rollout_readouts,
 )
 
-FORECAST_SCHEMA_VERSION = "autops.forecast-audit/v1"
+FORECAST_SCHEMA_VERSION = "autops.forecast-audit/v2"
 
 
 def _accumulate(values: np.ndarray, flows: list[int]) -> np.ndarray:
@@ -199,6 +202,16 @@ def audit_recursive_forecasts(
             "provenance": collect_provenance(settings, asset_root()),
             "context_count": {"all": len(sampled), "near_contact": int(flags.sum())},
             "metrics": metrics,
+            "contexts": [
+                {
+                    **context_record(evaluation, context),
+                    "truth": finite_values(truth[index]),
+                    "forecasts": {
+                        method: finite_values(values[index]) for method, values in forecasts.items()
+                    },
+                }
+                for index, context in enumerate(sampled)
+            ],
         },
     )
 

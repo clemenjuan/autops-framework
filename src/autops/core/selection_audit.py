@@ -19,6 +19,7 @@ import numpy as np
 
 from autops.config import asset_root
 from autops.core.offline import (
+    context_record,
     evaluation_record,
     held_out,
     near_contact,
@@ -132,14 +133,8 @@ def audit_candidate_selection(
             "provenance": collect_provenance(settings, asset_root()),
             "metrics": _selection_metrics(banks, oracle, flags, cem.elites),
             "contexts": [
-                {
-                    "episode": episode,
-                    "seed": int(evaluation.episode_seed[episode]),
-                    "step": step,
-                    "near_contact": flag,
-                    "lewm_cem_regret": float(value),
-                }
-                for (episode, step, flag), value in zip(sampled, regret, strict=True)
+                {**context_record(evaluation, context), "lewm_cem_regret": float(value)}
+                for context, value in zip(sampled, regret, strict=True)
             ],
         },
     )

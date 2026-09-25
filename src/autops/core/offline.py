@@ -113,6 +113,25 @@ def planner_history(
     }
 
 
+def context_record(trace: TraceDataset, context: tuple[int, int, bool]) -> dict[str, Any]:
+    """Identify a sampled context by its physical seed, so uncertainty can be clustered by it."""
+
+    episode, step, near = context
+    return {
+        "episode": episode,
+        "seed": int(trace.episode_seed[episode]),
+        "step": step,
+        "near_contact": bool(near),
+    }
+
+
+def finite_values(values: np.ndarray) -> list[Any]:
+    """Nest an array as lists for strict JSON; non-finite entries become ``None``."""
+
+    array = np.asarray(values, dtype=np.float64)
+    return np.where(np.isfinite(array), array, None).tolist()
+
+
 def write_evidence(output: str | Path | None, payload: dict[str, Any]) -> dict[str, Any]:
     """Write an audit payload as JSON when an output is given and return it."""
 
@@ -137,7 +156,9 @@ def evaluation_record(test_trace: TraceDataset | None) -> dict[str, Any]:
 
 
 __all__ = [
+    "context_record",
     "evaluation_record",
+    "finite_values",
     "held_out",
     "load_planner_bundle",
     "near_contact",

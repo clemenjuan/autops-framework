@@ -6,7 +6,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from autops.config import expand_coordinate
+from autops.config import expand_coordinate, parse_overrides
 from autops.core.exporter import export_trace
 from autops.core.replay import replay_environments
 from autops.core.selection_audit import audit_candidate_selection
@@ -30,6 +30,16 @@ def test_replay_rebuilds_logged_records_and_detects_divergence(tmp_path) -> None
     trace.mode[1, 2] = (trace.mode[1, 2] + 3) % 7
     with pytest.raises(ValueError, match="diverged from the trace at step 3"):
         replay_environments(trace, 1, [7])
+
+
+def test_replay_rejects_a_trace_exported_under_other_physics(tmp_path) -> None:
+    overrides = parse_overrides(["mission.storage.obc_capacity_mb=2048"])
+    spec = expand_coordinate(
+        "eventsat/sas/ao/symb", episodes=1, steps=8, seeds=[5], overrides=overrides
+    )
+    trace = load_trace(export_trace(spec, tmp_path / "trace.npz", prefer_orekit=False))
+    with pytest.raises(ValueError, match="canonical configuration"):
+        replay_environments(trace, 0, [3])
 
 
 def test_selection_audit_scores_one_bank_per_context(tmp_path, tiny_lewm) -> None:

@@ -2,10 +2,12 @@
 
 A trace stores encoded vectors, not the raw decision records and simulator
 state that planners and counterfactual checks consume. Replaying an episode's
-logged requested commands from its launch seed rebuilds them. Each replayed
-record must re-encode to the logged observation exactly, which rejects traces
-exported under other settings, another orbital backend, or with planning events
-whose energy the trace does not record.
+logged requested commands from its launch seed rebuilds them. A source must
+have been exported under its coordinate's canonical configuration, the only one
+a trace lets replay rebuild, and each replayed record must re-encode to the
+logged observation exactly. Together these reject traces exported under other
+physics, another orbital backend, or with planning events whose energy the
+trace does not record.
 """
 
 from __future__ import annotations
@@ -16,6 +18,7 @@ from copy import deepcopy
 import numpy as np
 
 from autops.config import expand_coordinate
+from autops.core.provenance import scientific_config_sha256
 from autops.core.runner import eventsat_environment
 from autops.missions.eventsat.env import EventSatEnvironment
 from autops.missions.eventsat.observation import encode_vectors
@@ -43,6 +46,17 @@ def replay_environments(
         first += source.episode_count
     else:
         raise ValueError(f"trace has no episode {episode}")
+    exported = expand_coordinate(
+        source.coordinate,
+        episodes=source.episode_count,
+        steps=trace.n_steps,
+        seeds=list(source.seeds),
+    )
+    if scientific_config_sha256(exported.model_dump(mode="json")) != source.config_sha256:
+        raise ValueError(
+            f"{source.coordinate} was not exported under its canonical configuration; "
+            "replay cannot rebuild its simulator"
+        )
     seed = int(trace.episode_seed[episode])
     spec = expand_coordinate(source.coordinate, steps=trace.n_steps, seeds=[seed])
     env = eventsat_environment(

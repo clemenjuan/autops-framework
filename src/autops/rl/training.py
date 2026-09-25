@@ -185,10 +185,10 @@ class RLlibPPOTrainer:
             **self._spaces,
             "recipe": self.recipe,
             "provenance": collect_provenance(experiment, asset_root()),
+            # An allowlist: RLlib results also carry host names, node addresses and pids.
             "last_result": {
-                key: value
-                for key, value in self._last_result.items()
-                if isinstance(value, (str, int, float, bool, type(None)))
+                "training_iteration": int(self._last_result.get("training_iteration", 0)),
+                **_iteration_metrics(self._last_result, self.spec.mission),
             },
         }
         path = directory / MANIFEST_NAME

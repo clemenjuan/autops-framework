@@ -239,6 +239,10 @@ def test_trained_checkpoint_is_evaluated_through_the_runner(tmp_path: Path) -> N
     checkpoint = RLlibPPOTrainer(spec, recipe, tmp_path / "ppo", prefer_orekit=False).train()
     manifest = json.loads((checkpoint / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["sampled_steps"] == 128
+    # Manifests enter model artifacts: no machine identity may leak from RLlib results.
+    serialized = json.dumps(manifest)
+    assert "hostname" not in serialized and "node_ip" not in serialized
+    assert manifest["last_result"]["training_iteration"] >= 1
     assert (checkpoint / "step_000000064" / "manifest.json").is_file()
     assert (checkpoint / "tensorboard").is_dir()
     evaluation = expand_coordinate(

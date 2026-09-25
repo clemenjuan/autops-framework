@@ -1,5 +1,8 @@
+from copy import deepcopy
+
 import pytest
 
+from autops.config import expand_coordinate
 from autops.llm.agentic_prompts import (
     AGENTIC_SCHEDULE_SYSTEM_PROMPT,
     format_forced_schedule_prompt,
@@ -22,6 +25,8 @@ from autops.llm.tools import (
     evaluate_plan,
     get_tool_schemas,
 )
+from autops.missions.eventsat.env import EventSatEnvironment
+from autops.missions.eventsat.observation import encode_vectors, onboard_view
 
 
 def test_operational_prompt_invariants_are_preserved() -> None:
@@ -147,3 +152,22 @@ def test_what_if_tools_apply_each_mode_battery_threshold() -> None:
     assert "payload_observe" not in _get_feasible_modes(state)
     above = check_constraints({**state, "battery_soc": 0.41}, "payload_observe")
     assert above["feasible"] and above["productive_this_step"]
+
+
+@pytest.mark.parametrize("attitude", ["charging", "payload_observe"])
+def test_what_if_settling_follows_the_mode_the_environment_resolves(attitude) -> None:
+    config = deepcopy(expand_coordinate("eventsat/sas/ao/symb").mission_config)
+    config["anomalies"]["probability_per_step"] = 0.0
+    env = EventSatEnvironment(config, max_steps=4, prefer_orekit=False)
+    env.reset(42)
+    env.state.battery_soc = 0.38
+    env.state.previous_mode = attitude
+    report = check_constraints(onboard_view(encode_vectors(env.observe())[2]), "payload_observe")
+    transition = env.step({"eventsat_0": {"mode": "payload_observe"}})
+    # Below its threshold the request settles as charging: a slew only away from observing.
+    slews = attitude == "payload_observe"
+    assert transition.info["in_transition"] == slews
+    assert env.state.previous_mode == "charging"
+    assert [item["constraint"] for item in report["violations"]] == ["mode_battery"]
+    assert report["transition_steps_required"] == (env.settling_steps if slews else 0)
+    assert report["transition_target_mode"] == ("charging" if slews else None)

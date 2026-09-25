@@ -5,7 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from autops.missions.eventsat.physics import MODES
+from autops.missions.attitude import settle_mode
+from autops.missions.eventsat.physics import MODES, resolve_mode, safety_required
 from autops.missions.eventsat.transitions import record_number
 
 
@@ -153,11 +154,7 @@ def check_constraints(state: dict[str, Any], proposed_mode: str = "charging") ->
     """Validate a candidate against declared telemetry, without changing state."""
 
     violations, warnings, below_threshold = _battery_and_health(state, proposed_mode)
-    soc = record_number(state, "battery_soc", 0.5)
-    safety_forced = str(state.get("health_status", "nominal")) != "nominal" or soc <= (
-        record_number(state, "battery_min_soc", 0.20)
-    )
-    settling = _settling(state, proposed_mode, safety_forced=safety_forced)
+    settling = _settling(state, proposed_mode)
     if settling["command_ignored"]:
         # An ongoing slew keeps its initial target: the command is ignored, not queued,
         # and therefore neither a violation beyond an invalid mode nor productive.
@@ -188,29 +185,43 @@ def check_constraints(state: dict[str, Any], proposed_mode: str = "charging") ->
     }
 
 
-def _settling(state: dict[str, Any], proposed_mode: str, *, safety_forced: bool) -> dict[str, Any]:
-    """Attitude consequence of a command under the environment's slew rule.
+def _settling(state: dict[str, Any], proposed_mode: str) -> dict[str, Any]:
+    """Attitude consequence of a command under the environment's resolution and slew rules.
 
-    A slew fixes its target when it starts; commands while settling are ignored,
-    and only environment-enforced safety preempts it.
+    The environment slews toward the resolved mode, so a request it replaces with
+    charging slews as charging. A slew fixes its target when it starts; commands
+    while settling are ignored, and only environment-enforced safety preempts it.
     """
 
+    soc = record_number(state, "battery_soc", 0.5)
+    mandatory_safe = safety_required(
+        battery_soc=soc,
+        minimum_soc=record_number(state, "battery_min_soc", 0.20),
+        anomaly_active=str(state.get("health_status", "nominal")) != "nominal",
+    )
+    resolved = resolve_mode(
+        proposed_mode,
+        mandatory_safe=mandatory_safe,
+        battery_soc=soc,
+        constraints=state.get("mode_constraints") or {},
+    )
     settling_steps = int(record_number(state, "settling_time_steps", 0.0))
     remaining = int(record_number(state, "transition_steps_remaining", 0.0))
-    target = str(state.get("previous_mode", "charging"))
-    maneuver_modes = set(state.get("attitude_maneuver_modes") or ())
-    active = not safety_forced and settling_steps > 0
-    ignored = active and remaining > 0
-    starts = (
-        active
-        and not ignored
-        and proposed_mode != target
-        and (proposed_mode in maneuver_modes or target in maneuver_modes)
+    _, target, _, transitioning = settle_mode(
+        resolved,
+        str(state.get("previous_mode", "charging")),
+        remaining,
+        settling_steps,
+        set(state.get("attitude_maneuver_modes") or ()),
+        mandatory_safe=mandatory_safe,
     )
+    ignored = transitioning and remaining > 0
     return {
         "command_ignored": ignored,
-        "transition_steps_required": remaining if ignored else settling_steps if starts else 0,
-        "transition_target_mode": target if ignored else proposed_mode if starts else None,
+        "transition_steps_required": (
+            remaining if ignored else settling_steps if transitioning else 0
+        ),
+        "transition_target_mode": target if transitioning else None,
     }
 
 

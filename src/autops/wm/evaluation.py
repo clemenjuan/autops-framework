@@ -1,6 +1,8 @@
 """Closed-loop evaluation through the same EventSat runner used in deployment.
 
 The checkpoint's validation split selects seeds, not simulator snapshots.
+Every distinct validation seed runs once: the collectors of a policy-diverse
+corpus share each seed, and a reset from it yields the same episode.
 Each episode starts from reset under the declared mission configuration and
 executes the deployed representation, including masking, projection, shaping,
 guidance, warm starts, held actions, reflexes, and compute-energy accounting.
@@ -143,10 +145,11 @@ def evaluate_lewm_cem(
     )
     if mission_mode not in artifact.mode_weight_presets:
         raise ValueError(f"unknown mission_mode {mission_mode!r}")
-    selected = contract.episodes.validation[:max_episodes]
-    seeds = [int(trace.episode_seed[index]) for index in selected]
-    if len(set(seeds)) != len(seeds):
-        raise ValueError("validation episodes must have distinct seeds for paired evaluation")
+    first_episode: dict[int, int] = {}
+    for index in contract.episodes.validation:
+        first_episode.setdefault(int(trace.episode_seed[index]), index)
+    selected = tuple(first_episode.values())[:max_episodes]
+    seeds = list(first_episode)[:max_episodes]
     backends = {source.orbital_backend for source in trace.metadata.sources}
     if len(backends) != 1:
         raise ValueError("evaluation requires one declared orbital backend in the trace")

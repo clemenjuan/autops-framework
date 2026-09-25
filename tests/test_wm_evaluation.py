@@ -11,7 +11,7 @@ import pytest
 
 from autops.commands import main
 from autops.config import expand_coordinate
-from autops.core.exporter import export_trace
+from autops.core.exporter import export_trace, export_traces
 from autops.core.workflows import evaluate_lewm_cem, fit_planner_artifact
 from autops.representations import cem_planner as deployment_module
 from autops.wm import cem as cem_module
@@ -119,6 +119,26 @@ def test_evaluation_cli_writes_durable_evidence(
     assert summary["evaluation"] == str(output)
     assert summary["episodes"] == 1
     assert len(json.loads(output.read_text(encoding="utf-8"))["run"]["episodes"]) == 1
+
+
+def test_evaluation_runs_each_validation_seed_once(
+    tmp_path: Path, tiny_lewm: Callable[[Any], Any]
+) -> None:
+    specs = [
+        expand_coordinate(coordinate, episodes=4, steps=7, seeds=[41, 42, 43, 44])
+        for coordinate in ("eventsat/sas/ao/symb", "eventsat/sas/ag/symb")
+    ]
+    trace_path = export_traces(specs, tmp_path / "trace.npz", prefer_orekit=False)
+    trace = load_trace(trace_path)
+    trained = tiny_lewm(trace)
+    checkpoint = save_checkpoint(tmp_path / "model.pt", trained)
+    artifact = fit_planner_artifact(trace_path, checkpoint, tmp_path / "planner.json")["artifact"]
+    validation = trained.checkpoint_contract.episodes.validation
+    seeds = sorted({int(trace.episode_seed[index]) for index in validation})
+    assert len(validation) == 2 * len(seeds)
+
+    summary = evaluate_lewm_cem(trace_path, artifact, tmp_path / "evaluation.json", max_episodes=5)
+    assert sorted(summary["seeds"]) == seeds
 
 
 def test_evaluation_rejects_changed_trace(

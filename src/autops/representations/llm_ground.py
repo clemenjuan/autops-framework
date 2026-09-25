@@ -69,6 +69,12 @@ def _decision(value: dict[str, Any]) -> dict[str, Any] | None:
     return value if value.get("schedule") is not None else None
 
 
+def _restate(telemetry: str, prompt: str) -> str:
+    """Repeat a planning event's telemetry in a later turn: the client keeps no history."""
+
+    return f"{telemetry}\n\nPLANNING SO FAR:\n{prompt}"
+
+
 def _merge_schedule(blocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
     merged: list[dict[str, Any]] = []
     for block in blocks:
@@ -226,6 +232,7 @@ class LLMSchedulePlanner(Representation):
             if self.role == "onboard"
             else format_schedule_planning_prompt(state, gap_steps)
         )
+        telemetry = user_prompt
         seed = self._retry_seed(attempt)
         raw = self.client.generate(
             system_prompt,
@@ -247,10 +254,11 @@ class LLMSchedulePlanner(Representation):
             result = execute_tool(name, args, state)
             self._tool_calls += 1
             context.append({"step": "tool", "name": name, "result": result})
-            user_prompt = (
-                format_onboard_tool_result_prompt(name, result, context, gap_steps)
+            user_prompt = _restate(
+                telemetry,
+                format_onboard_tool_result_prompt(context, gap_steps)
                 if self.role == "onboard"
-                else format_schedule_tool_result_prompt(name, result, context, gap_steps)
+                else format_schedule_tool_result_prompt(name, result, context, gap_steps),
             )
             raw = self.client.generate(
                 system_prompt,
@@ -265,10 +273,11 @@ class LLMSchedulePlanner(Representation):
             tool_call = parsed.get("tool_call")
 
         if decision is None:
-            user_prompt = (
-                format_forced_onboard_schedule_prompt(gap_steps)
+            user_prompt = _restate(
+                telemetry,
+                format_forced_onboard_schedule_prompt(context, gap_steps)
                 if self.role == "onboard"
-                else format_forced_schedule_prompt(context, gap_steps)
+                else format_forced_schedule_prompt(context, gap_steps),
             )
             raw = self.client.generate(
                 system_prompt,

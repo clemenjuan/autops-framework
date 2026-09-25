@@ -72,6 +72,33 @@ def test_single_shot_replay_returns_new_paradigm_schedule_shape() -> None:
     assert "replay plan" in (planner.last_rationale or "")
 
 
+@pytest.mark.parametrize("role", ["ground", "onboard"])
+def test_agentic_follow_ups_keep_telemetry_and_tool_evidence(role) -> None:
+    tool = json.dumps(
+        {
+            "plan": "check",
+            "tool_call": {"name": "check_constraints", "args": {"proposed_mode": "charging"}},
+        }
+    )
+    planner = create_representation(
+        "eventsat", "llm-a", role, {"llm_replay": [tool, tool, tool, _response("charging")]}
+    )
+    prompts: list[str] = []
+    generate = planner.client.generate
+
+    def recording(system_prompt, user_prompt, **kwargs):
+        prompts.append(user_prompt)
+        return generate(system_prompt, user_prompt, **kwargs)
+
+    planner.client.generate = recording
+    planner.select_action(DecisionContext(_state(battery_soc=0.61), {}, None, 0, role=role))
+
+    # Three model turns run two tools; the forced decision must still see both results.
+    assert len(prompts) == 4
+    assert all("Battery SoC: 0.61" in prompt for prompt in prompts)
+    assert prompts[-1].count("check_constraints") == 2
+
+
 @pytest.mark.parametrize("token", ["llm-s", "llm-a", "hllm-s", "hllm-a"])
 def test_deterministic_mock_plans_every_onboard_substrate(token) -> None:
     planner = create_representation(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from autops.llm.tools import (
@@ -116,29 +117,38 @@ def format_onboard_schedule_prompt(state: dict[str, Any], remaining_steps: int) 
     )
 
 
+def _tool_evidence(accumulated_context: list[dict[str, Any]]) -> str:
+    results = [
+        f"{item.get('name')}: {json.dumps(item.get('result', {}), sort_keys=True)}"
+        for item in accumulated_context
+        if item.get("step") == "tool"
+    ]
+    return f"Tool results so far: {'; '.join(results) or 'none'}."
+
+
 def format_onboard_tool_result_prompt(
-    tool_name: str,
-    tool_result: dict[str, Any],
-    accumulated_context: list[dict[str, Any]],
-    remaining_steps: int,
+    accumulated_context: list[dict[str, Any]], remaining_steps: int
 ) -> str:
     """Request a bounded reflection or final onboard schedule."""
 
     prior = [str(item.get("content", "")) for item in accumulated_context if item.get("content")]
     return (
-        f"Prior reasoning: {prior[-2:] or 'none'}. Tool result ({tool_name}): {tool_result}. "
+        f"Prior reasoning: {prior[-2:] or 'none'}. {_tool_evidence(accumulated_context)} "
         "Reflect briefly, then emit the final "
         f"immediate mode and {remaining_steps}-step held schedule under `decision`. "
         f"Only these tools exist: {', '.join(SCHEDULE_TOOL_NAMES)}. Respond with JSON."
     )
 
 
-def format_forced_onboard_schedule_prompt(remaining_steps: int) -> str:
+def format_forced_onboard_schedule_prompt(
+    accumulated_context: list[dict[str, Any]], remaining_steps: int
+) -> str:
     """Close an agentic event after the fixed tool budget."""
 
     return (
-        "Your tool budget is exhausted. Tool calls are not available. Emit only the "
-        f"decision JSON with an immediate mode and {remaining_steps}-step held schedule."
+        f"{_tool_evidence(accumulated_context)} Your tool budget is exhausted. Tool calls "
+        "are not available. Emit only the decision JSON with an immediate mode and "
+        f"{remaining_steps}-step held schedule."
     )
 
 

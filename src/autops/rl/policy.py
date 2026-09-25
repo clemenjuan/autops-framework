@@ -3,8 +3,9 @@
 Evaluation restores only the trained RLlib policy (``Policy.from_checkpoint``)
 rather than the whole algorithm, so no Ray workers, training GPUs, or rollout
 runners start, and an Orekit JVM can already be running. A manifest written next
-to every checkpoint declares the observation contract; a checkpoint trained on any
-other contract is rejected before loading.
+to every checkpoint declares the observation contract and each policy's content
+digest; a checkpoint trained on any other contract, or whose weights no longer
+match their digest, is rejected before loading.
 """
 
 from __future__ import annotations
@@ -19,7 +20,7 @@ import numpy as np
 
 from autops.rl.spaces import RLSpec
 
-MANIFEST_SCHEMA_VERSION = "autops.rl.checkpoint/v1"
+MANIFEST_SCHEMA_VERSION = "autops.rl.checkpoint/v2"
 MANIFEST_NAME = "manifest.json"
 _LOADED: dict[tuple[str, str], Any] = {}
 
@@ -59,11 +60,29 @@ def validate_manifest(
         )
 
 
-def checkpoint_identity(directory: Path, manifest: Mapping[str, Any], policy_id: str) -> dict:
-    """Public-safe identity of the deployed policy for result provenance."""
+def policy_sha256(directory: Path, policy_id: str) -> str:
+    """Content digest of one saved policy: every file's relative path and bytes."""
 
+    root = directory / "policies" / policy_id
+    files = sorted(path for path in root.rglob("*") if path.is_file())
+    if not files:
+        raise FileNotFoundError(f"RL policy {policy_id!r} has no saved files under {root}")
+    digest = hashlib.sha256()
+    for path in files:
+        digest.update(path.relative_to(root).as_posix().encode("utf-8") + b"\0")
+        digest.update(hashlib.sha256(path.read_bytes()).digest())
+    return digest.hexdigest()
+
+
+def checkpoint_identity(directory: Path, manifest: Mapping[str, Any], policy_id: str) -> dict:
+    """Public-safe identity of the deployed policy, bound to the weights it loads."""
+
+    digest = policy_sha256(directory, policy_id)
+    if (manifest.get("policy_sha256") or {}).get(policy_id) != digest:
+        raise ValueError(f"RL policy {policy_id!r} weights differ from its checkpoint manifest")
     return {
         "source": "checkpoint",
+        "policy_sha256": digest,
         "manifest_sha256": hashlib.sha256((directory / MANIFEST_NAME).read_bytes()).hexdigest(),
         "observation_schema_id": manifest["observation_schema_id"],
         "sampled_steps": manifest.get("sampled_steps"),
@@ -75,13 +94,23 @@ def checkpoint_identity(directory: Path, manifest: Mapping[str, Any], policy_id:
 def merge_identities(identities: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     """One run-level identity: agents may use several policies of a single checkpoint."""
 
+    per_policy = {"policy_id", "policy_sha256"}
     shared = [
-        {key: value for key, value in item.items() if key != "policy_id"} for item in identities
+        {key: value for key, value in item.items() if key not in per_policy} for item in identities
     ]
     if not shared or any(item != shared[0] for item in shared[1:]):
         raise ValueError("organisation agents deployed different RL checkpoints")
+    digests = {
+        str(item["policy_id"]): item["policy_sha256"]
+        for item in identities
+        if "policy_id" in item and "policy_sha256" in item
+    }
     policy_ids = sorted({str(item["policy_id"]) for item in identities if "policy_id" in item})
-    return {**shared[0], **({"policy_ids": policy_ids} if policy_ids else {})}
+    return {
+        **shared[0],
+        **({"policy_ids": policy_ids} if policy_ids else {}),
+        **({"policy_sha256": dict(sorted(digests.items()))} if digests else {}),
+    }
 
 
 class RLlibPolicy:
@@ -155,6 +184,7 @@ __all__ = [
     "RandomPolicy",
     "checkpoint_identity",
     "merge_identities",
+    "policy_sha256",
     "read_manifest",
     "validate_manifest",
 ]

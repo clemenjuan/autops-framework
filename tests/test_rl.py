@@ -107,6 +107,21 @@ def test_checkpoints_from_another_contract_are_rejected(updates: dict[str, Any])
         validate_manifest(_manifest(**updates), EVENTSAT_RL_SPEC, "shared_policy", 45, [7])
 
 
+def test_checkpoint_identity_binds_the_policy_weights(tmp_path: Path) -> None:
+    from autops.rl.policy import checkpoint_identity, policy_sha256
+
+    weights = tmp_path / "policies" / "shared_policy"
+    weights.mkdir(parents=True)
+    (weights / "policy_state.pkl").write_bytes(b"trained")
+    manifest = _manifest(policy_sha256={"shared_policy": policy_sha256(tmp_path, "shared_policy")})
+    (tmp_path / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    identity = checkpoint_identity(tmp_path, manifest, "shared_policy")
+    assert identity["policy_sha256"] == manifest["policy_sha256"]["shared_policy"]
+    (weights / "policy_state.pkl").write_bytes(b"replaced")
+    with pytest.raises(ValueError, match="weights differ"):
+        checkpoint_identity(tmp_path, manifest, "shared_policy")
+
+
 def test_rl_representation_requires_a_checkpoint_or_explicit_mock() -> None:
     with pytest.raises(ValueError, match=r"representation\.checkpoint"):
         EventSatRL({})
@@ -253,6 +268,7 @@ def test_trained_checkpoint_is_evaluated_through_the_runner(tmp_path: Path) -> N
     result = ExperimentRunner(evaluation, save=False, prefer_orekit=False).run()
     identity = result["experiment"]["rl_policy_identity"]
     assert identity["source"] == "checkpoint" and identity["sampled_steps"] == 128
+    assert identity["policy_sha256"] == manifest["policy_sha256"]["shared_policy"]
     representation = EventSatRL({"checkpoint": str(checkpoint), "deterministic": True})
     observation = deepcopy(eventsat_environment(evaluation, prefer_orekit=False).reset(5))
     context = DecisionContext(representation.encode_observation(observation), observation, None, 0)

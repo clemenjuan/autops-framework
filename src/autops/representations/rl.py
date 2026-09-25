@@ -65,8 +65,9 @@ class RLPolicy(Representation):
             spec.obs_dim * len(self.observe_ids),
             self.adapter.action_dims,
         )
-        self._policy = RLlibPolicy(directory, policy_id, self.adapter.action_dims)
+        # The identity check verifies the weights against the manifest before loading them.
         self.identity = checkpoint_identity(directory, manifest, policy_id)
+        self._policy = RLlibPolicy(directory, policy_id, self.adapter.action_dims)
 
     def reset(self, seed: int | None = None) -> None:
         super().reset(seed)

@@ -25,7 +25,7 @@ from autops.config import ExperimentSpec, asset_root, load_yaml, strict_deep_mer
 from autops.core.provenance import collect_provenance
 from autops.rl.diagnostics import EpisodeDiagnostics
 from autops.rl.models import MODEL_ARCHITECTURE, register_models
-from autops.rl.policy import MANIFEST_NAME, MANIFEST_SCHEMA_VERSION
+from autops.rl.policy import MANIFEST_NAME, MANIFEST_SCHEMA_VERSION, policy_sha256
 from autops.rl.policy_mapping import PolicySharingConfig, build_policy_specs
 from autops.rl.rllib_env import AUTOPSRLLibMultiAgentEnv
 from autops.rl.spaces import rl_spec
@@ -190,6 +190,11 @@ class RLlibPPOTrainer:
                 "training_iteration": int(self._last_result.get("training_iteration", 0)),
                 **_iteration_metrics(self._last_result, self.spec.mission),
             },
+        }
+        manifest["policy_sha256"] = {
+            policy.name: policy_sha256(directory, policy.name)
+            for policy in sorted((directory / "policies").iterdir())
+            if policy.is_dir()
         }
         path = directory / MANIFEST_NAME
         path.write_text(json.dumps(manifest, indent=2, sort_keys=True, default=str), "utf-8")

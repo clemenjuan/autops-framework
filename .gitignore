@@ -22,7 +22,8 @@
 *.egg-info/
 htmlcov/
 
-# Editors, operating systems, and scratch files.
+# Agent worktrees, editors, operating systems, and scratch files.
+/.claude/worktrees/
 .DS_Store
 .idea/
 .vscode/

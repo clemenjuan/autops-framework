@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
@@ -274,6 +275,18 @@ def test_trained_checkpoint_is_evaluated_through_the_runner(tmp_path: Path) -> N
     context = DecisionContext(representation.encode_observation(observation), observation, None, 0)
     first = representation.select_action(context)
     assert first == representation.select_action(context)
+    # Weights replaced at one path are restored again, not served from the policy cache.
+    served = tmp_path / "served"
+    shutil.copytree(checkpoint / "step_000000064", served)
+    early = EventSatRL({"checkpoint": str(served)})
+    shutil.rmtree(served)
+    shutil.copytree(checkpoint, served)
+    late = EventSatRL({"checkpoint": str(served)})
+    assert late.identity["policy_sha256"] == identity["policy_sha256"]
+    assert early.identity["policy_sha256"] != late.identity["policy_sha256"]
+    vector = context.state["vector"]
+    early_probabilities = early._policy.act(vector, deterministic=True)[1]
+    assert not np.array_equal(early_probabilities, late._policy.act(vector, deterministic=True)[1])
 
 
 @pytest.mark.rl

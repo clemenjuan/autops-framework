@@ -22,7 +22,7 @@ from autops.rl.spaces import RLSpec
 
 MANIFEST_SCHEMA_VERSION = "autops.rl.checkpoint/v2"
 MANIFEST_NAME = "manifest.json"
-_LOADED: dict[tuple[str, str], Any] = {}
+_LOADED: dict[tuple[str, str, str], Any] = {}
 
 
 def read_manifest(checkpoint: str | Path) -> tuple[Path, dict[str, Any]]:
@@ -114,10 +114,16 @@ def merge_identities(identities: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
 
 
 class RLlibPolicy:
-    """One trained RLlib policy with deterministic or privately seeded sampling."""
+    """One trained RLlib policy with deterministic or privately seeded sampling.
 
-    def __init__(self, directory: Path, policy_id: str, action_dims: Sequence[int]) -> None:
-        key = (str(directory), policy_id)
+    Restored policies are cached per process under their verified content digest,
+    so weights replaced at the same path are restored rather than served stale.
+    """
+
+    def __init__(
+        self, directory: Path, policy_id: str, action_dims: Sequence[int], *, policy_sha256: str
+    ) -> None:
+        key = (str(directory), policy_id, policy_sha256)
         if key not in _LOADED:
             from ray.rllib.policy.policy import Policy
 

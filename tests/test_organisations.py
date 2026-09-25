@@ -164,3 +164,26 @@ def test_organisations_create_decision_loops_through_the_plugin_registry(monkeyp
     loops.reset(0, state)
     loops.act(state)
     assert created == [("ssa", "symb", "onboard")] * 2
+
+
+@pytest.mark.parametrize(
+    ("token", "links"),
+    [("imas", set()), ("dmas", {("sat_0", "sat_1"), ("sat_1", "sat_0")})],
+)
+def test_only_organisations_with_a_channel_authorise_isl_links(token, links) -> None:
+    from autops.organisations.base import bind_communication_topology
+
+    class Recorder:
+        links: object = "unset"
+
+        def configure_communication_links(self, value: object) -> None:
+            self.links = value
+
+    organisation = ORGANISATIONS[token]()
+    organisation.initialize(["sat_0", "sat_1"])
+    recorder = Recorder()
+    bind_communication_topology(organisation, recorder)
+    assert recorder.links == links
+    assert organisation.authorized_destinations("sat_0") == sorted(
+        destination for source, destination in links if source == "sat_0"
+    )

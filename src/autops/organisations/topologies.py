@@ -51,6 +51,10 @@ class IndependentAgents(_PerSatellite):
 
     token = "imas"
 
+    def logical_communication_edges(self) -> set[tuple[str, str]]:
+        # No agent may reach another, so no inter-satellite link is authorised.
+        return set()
+
 
 class DecentralisedAgents(_PerSatellite):
     """DMAS: equal peers; knowledge moves only through physical ISL sharing.

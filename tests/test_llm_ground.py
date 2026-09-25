@@ -72,6 +72,16 @@ def test_single_shot_replay_returns_new_paradigm_schedule_shape() -> None:
     assert "replay plan" in (planner.last_rationale or "")
 
 
+@pytest.mark.parametrize("token", ["llm-s", "llm-a", "hllm-s", "hllm-a"])
+def test_deterministic_mock_plans_every_onboard_substrate(token) -> None:
+    planner = create_representation(
+        "eventsat", token, "onboard", {"llm_mock": True, "plan_hold": 3}
+    )
+    action = planner.select_action(DecisionContext(_state(), {}, None, 0, role="onboard"))
+    assert action["eventsat_0"]["mode"] in {"charging", "communication"}
+    assert planner.diagnostics()["llm_calls"] == 1.0
+
+
 def test_onboard_single_shot_holds_schedule_without_extra_inference() -> None:
     replay = [_response("communication", [["payload_send", 2]]), _response("charging")]
     planner = create_representation(

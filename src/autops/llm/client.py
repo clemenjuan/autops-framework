@@ -402,16 +402,22 @@ class LLMClient:
         }
 
 
+# Ground prompts plan "THE NEXT n STEPS"; onboard prompts plan "NOW PLUS THE NEXT n HELD STEPS".
+_PLAN_REQUEST = re.compile(r"PLAN (?:NOW PLUS )?THE NEXT\s+(\d+)\s+(?:HELD )?STEPS", re.IGNORECASE)
+
+
 def _mock_response(user_prompt: str) -> str:
     """Deterministic, explicitly non-scoring response used by CI and smoke tests."""
 
-    match = re.search(r"PLAN THE NEXT\s+(\d+)\s+STEPS", user_prompt, re.IGNORECASE)
+    match = _PLAN_REQUEST.search(user_prompt)
     gap = max(1, int(match.group(1))) if match else 1
-    obc = re.search(r"OBC ready for downlink:\s*([0-9.]+)", user_prompt)
-    contact = "Ground pass active now: YES" in user_prompt
+    obc = re.search(r"OBC ready(?: for downlink)?:\s*([0-9.]+)", user_prompt)
+    contact = (
+        "Ground pass active now: YES" in user_prompt or "Ground station: visible now" in user_prompt
+    )
     mode = "communication" if contact and obc and float(obc.group(1)) > 0 else "charging"
     schedule = [["charging", gap]]
     decision = {"mode": mode, "schedule": schedule, "rationale": "deterministic mock"}
-    if "PLAN THE NEXT" in user_prompt or "tool budget is exhausted" in user_prompt:
+    if match or "tool budget is exhausted" in user_prompt:
         return json.dumps({"decision": decision})
     return json.dumps({"mode": mode, "rationale": "deterministic mock"})

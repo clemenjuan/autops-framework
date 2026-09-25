@@ -163,26 +163,49 @@ def test_counterfactual_audit_compares_model_and_simulator_responses(tmp_path, t
     json.dumps(audit, allow_nan=False)
 
 
-def test_event_labels_measure_pass_start_duration_and_eclipse_edges(tmp_path) -> None:
-    from autops.core.event_audit import EVENTS, event_labels
+def _event_trace(tmp_path: Path):
+    """Eight one-minute records: a pass starting inside record 2, one aligned with record 7."""
+
     from autops.wm.schema import EVENTSAT_STATES
 
     trace = load_trace(_export(tmp_path / "trace.npz", [5, 6]))
     column = {name: EVENTSAT_STATES.index(name) for name in EVENTSAT_STATES}
     state = trace.state[0]
     state[:] = 0.0
-    state[:, column["time_to_next_pass"]] = [2, 1, 0, 4, -1, -1, -1, -1]
+    state[:, column["station_visible"]] = [0, 0, 0, 1, 1, 0, 0, 1]
     state[:, column["physical_contact_seconds"]] = [0, 0, 30, 60, 20, 0, 0, 40]
     state[:, column["in_sunlight"]] = [1, 1, 0, 0, 1, 1, 1, 1]
-    state[:, column["time_to_next_eclipse"]] = [2, 1, -1, -1, -1, -1, -1, -1]
+    return trace, column
+
+
+def test_event_labels_time_each_event_at_its_first_flagged_record(tmp_path) -> None:
+    from autops.core.event_audit import EVENTS, event_labels
+
+    trace, _ = _event_trace(tmp_path)
     labels = event_labels(trace)[0]
     start, duration, entry, exit_ = (EVENTS.index(name) for name in EVENTS)
-    np.testing.assert_allclose(labels[:3, start], [2, 1, 0])
+    # The first pass begins inside record 2 but is first visible at record 3.
+    np.testing.assert_allclose(labels[:7, start], [3, 2, 1, 4, 3, 2, 1])
+    assert np.isnan(labels[7, start])
     np.testing.assert_allclose(labels[:3, duration], [110, 110, 110])
-    assert np.isnan(labels[3, duration]) and np.isnan(labels[4, start])
+    assert np.isnan(labels[3:, duration]).all()
     np.testing.assert_allclose(labels[:2, entry], [2, 1])
+    assert np.isnan(labels[2:, entry]).all()
     np.testing.assert_allclose(labels[2:4, exit_], [2, 1])
     assert np.isnan(labels[0, exit_])
+
+
+def test_true_future_flags_reproduce_every_label_inside_the_rollout(tmp_path) -> None:
+    from autops.core.event_audit import EVENTS, _crossing_events, event_labels
+
+    trace, column = _event_trace(tmp_path)
+    flags = trace.state[0][:, [column["station_visible"], column["in_sunlight"]]]
+    labels = event_labels(trace)[0]
+    for step in range(len(flags) - 1):
+        events = _crossing_events(flags[None, step + 1 :], flags[None, step] > 0.5, 1.0)[0]
+        for index, name in enumerate(EVENTS):
+            if name != "pass_duration_s" and np.isfinite(labels[step, index]):
+                assert events[index] == labels[step, index], (step, name)
 
 
 def test_event_audit_scores_every_method_on_shared_contexts(tmp_path, tiny_lewm) -> None:
@@ -230,23 +253,16 @@ def test_rollout_event_scores_respect_each_event_horizon() -> None:
     )
     predicted = np.asarray(
         [
-            [47, np.nan, 48, 48],
-            [47, np.nan, 48, 48],
+            [48, np.nan, 48, 48],
+            [48, np.nan, 48, 48],
             [47, np.nan, 47, 47],
             [np.inf, np.nan, np.inf, np.inf],
         ]
     )
     scores = _rollout_scores(predicted, truth, horizon_min=48)
 
-    # Pass starts are floored into action intervals; eclipse edges are observed
-    # at states, including the final predicted state at the horizon.
-    assert scores["pass_start_min"] == {
-        "n_inside": 2,
-        "detection_rate": 0.5,
-        "mae": 0.0,
-        "false_alarm_rate": 1.0,
-    }
-    for name in ("eclipse_entry_min", "eclipse_exit_min"):
+    # Every event is observed at a record, including the final predicted one.
+    for name in ("pass_start_min", "eclipse_entry_min", "eclipse_exit_min"):
         assert scores[name] == {
             "n_inside": 3,
             "detection_rate": pytest.approx(2 / 3),
@@ -261,12 +277,12 @@ def test_rollout_event_scores_respect_each_event_horizon() -> None:
         (
             [-10, 10, 10, -10, -10, 10, 20],
             [True, True, False, False, False, True, True],
-            [0.0, 120.0, 5.0, 2.0],
+            [1.0, 120.0, 5.0, 2.0],
         ),
         (
             [-10, -10, -10, -10, -10, 10, 20],
             [True, True, True, True, True, True, True],
-            [4.0, np.nan, np.nan, np.nan],
+            [5.0, np.nan, np.nan, np.nan],
         ),
     ],
     ids=("complete-endings-and-censored-future-onset", "censored-endings"),

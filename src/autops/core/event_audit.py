@@ -16,6 +16,12 @@ events (beyond the recorded episode) are excluded.
   latents, applied to every latent of a rollout under the logged commands. The
   event is the first crossing inside the rollout; later events count as missed.
 
+Every event is timed at the first later record whose onboard flag shows it: the
+first record with the station visible, the first shaded record, the first sunlit
+record. Sampled flags resolve no finer, so a pass beginning inside a record is
+acquired at the next one, and every method predicts that same record. A pass
+lasts its physical contact seconds.
+
 Times are minutes at the 60 s step resolution; a pass shorter than a step can
 fall between samples. Each context row keeps the labels and every method's
 prediction in ``EVENTS`` order; ``None`` marks a censored or undefined value, and
@@ -53,7 +59,7 @@ from autops.wm.probes import affine_readout
 from autops.wm.schema import EVENTSAT_OBSERVATIONS, TraceDataset
 from autops.wm.scoring import latent_rollout
 
-EVENT_SCHEMA_VERSION = "autops.event-timing-audit/v2"
+EVENT_SCHEMA_VERSION = "autops.event-timing-audit/v3"
 EVENTS = ("pass_start_min", "pass_duration_s", "eclipse_entry_min", "eclipse_exit_min")
 Context = tuple[int, int, bool]
 
@@ -70,6 +76,22 @@ def _next_index(flags: np.ndarray) -> np.ndarray:
     return result
 
 
+def _later(flags: np.ndarray) -> np.ndarray:
+    """Index of the first true flag strictly after each step, or ``len`` when none."""
+
+    result = np.full(flags.shape, flags.shape[-1], dtype=np.int64)
+    result[:-1] = _next_index(flags)[1:]
+    return result
+
+
+def _onsets(flags: np.ndarray) -> np.ndarray:
+    """Records where a flag turns on; the first record has no predecessor to compare."""
+
+    onsets = np.zeros_like(flags)
+    onsets[1:] = flags[1:] & ~flags[:-1]
+    return onsets
+
+
 def event_labels(trace: TraceDataset) -> np.ndarray:
     """Privileged event times ``[episode, step, EVENTS]``; NaN where censored or undefined."""
 
@@ -78,21 +100,26 @@ def event_labels(trace: TraceDataset) -> np.ndarray:
     steps = np.arange(trace.n_steps)
     labels = np.full((*trace.state.shape[:2], len(EVENTS)), np.nan)
     for episode, state in enumerate(trace.state):
-        countdown = state[:, names.index("time_to_next_pass")].astype(np.int64)
-        entry = state[:, names.index("time_to_next_eclipse")]
-        contact = state[:, names.index("physical_contact_seconds")]
+        visible = state[:, names.index("station_visible")] > 0.5
         sunlit = state[:, names.index("in_sunlight")] > 0.5
-        valid = countdown >= 0
-        labels[episode, valid, 0] = countdown[valid] * minutes
-        start = np.minimum(steps + countdown, trace.n_steps - 1)
-        run_end = _next_index(contact <= 0.0)[start]
-        closed = valid & (steps + countdown < trace.n_steps) & (run_end < trace.n_steps)
+        contact = state[:, names.index("physical_contact_seconds")]
+        acquired = _later(_onsets(visible))
+        known = acquired < trace.n_steps
+        labels[episode, known, 0] = (acquired - steps)[known] * minutes
+        # The acquired pass's contact run starts after the last contact-free record.
+        at = np.minimum(acquired, trace.n_steps - 1)
+        run_start = np.maximum.accumulate(np.where(contact <= 0.0, steps, -1))[at] + 1
+        run_end = _next_index(contact <= 0.0)[at]
+        closed = known & (run_end < trace.n_steps)
         totals = np.concatenate([[0.0], np.cumsum(contact)])
-        labels[episode, closed, 1] = (totals[run_end] - totals[start])[closed]
-        labels[episode, entry >= 0, 2] = entry[entry >= 0] * minutes
-        exit_step = _next_index(sunlit)
-        shaded = ~sunlit & (exit_step < trace.n_steps)
-        labels[episode, shaded, 3] = (exit_step - steps)[shaded] * minutes
+        labels[episode, closed, 1] = (totals[run_end] - totals[run_start])[closed]
+        entered = _later(_onsets(~sunlit))
+        labels[episode, entered < trace.n_steps, 2] = (entered - steps)[
+            entered < trace.n_steps
+        ] * minutes
+        exited = _later(sunlit)
+        shaded = ~sunlit & (exited < trace.n_steps)
+        labels[episode, shaded, 3] = (exited - steps)[shaded] * minutes
     return labels
 
 
@@ -118,7 +145,7 @@ def _recurrence(trace: TraceDataset, episode: int, step: int, period: int) -> np
     duration = (complete[-1][1] - complete[-1][0]) * trace.metadata.timestep_s if complete else 0
     return np.asarray(
         [
-            next_after(rises - 1, step),
+            next_after(rises, step + 1),
             float(duration) if complete else np.nan,
             next_after(onsets(~sunlit), step + 1),
             np.nan if sunlit[-1] else next_after(onsets(sunlit), step + 1),
@@ -141,20 +168,24 @@ def _interval_events(
 ) -> np.ndarray:
     """Reduce forecast intervals measured from a fix to the audited events.
 
+    Edges are timed at the first record at or after them, as the labels are.
     Sampling closes open intervals at ``duration_s`` without marking them as
     censored. Treat endings at that boundary as unknown, preserving any observed
     onset; a real ending there cannot be distinguished from truncation.
     """
+
+    def flagged(offset_s: float) -> float:
+        return float(np.ceil(offset_s / step_s - 1e-9)) * step_s / 60.0
 
     future = [item for item in passes if item.start_s > 0.0]
     entries = [item for item in eclipses if item.start_s > 0.0]
     shaded = [item for item in eclipses if item.start_s == 0.0]
     return np.asarray(
         [
-            (future[0].start_s // step_s) * step_s / 60.0 if future else np.nan,
+            flagged(future[0].start_s) if future else np.nan,
             future[0].duration_s if future and future[0].end_s < duration_s else np.nan,
-            entries[0].start_s / 60.0 if entries else np.nan,
-            shaded[0].end_s / 60.0 if shaded and shaded[0].end_s < duration_s else np.nan,
+            flagged(entries[0].start_s) if entries else np.nan,
+            flagged(shaded[0].end_s) if shaded and shaded[0].end_s < duration_s else np.nan,
         ]
     )
 
@@ -245,13 +276,21 @@ def _rollout_events(
         evaluation.mode[episodes, offsets],
         device=device,
     )
-    readouts = rollout @ W.T + b
     current = evaluation.state[episodes[:, 0], offsets[:, 0]][:, columns] > 0.5
-    minutes = evaluation.metadata.timestep_s / 60.0
-    events = np.full((len(contexts), len(EVENTS)), np.nan)
+    return _crossing_events(rollout @ W.T + b, current, evaluation.metadata.timestep_s / 60.0)
+
+
+def _crossing_events(readouts: np.ndarray, current: np.ndarray, minutes: float) -> np.ndarray:
+    """Event times from visibility and sunlight values of the records after each context.
+
+    ``readouts`` is ``[context, step, (visible, sunlit)]`` and ``current`` holds each
+    context's own flags. An event is timed at the first record whose value shows it;
+    ``inf`` marks one the records do not reach.
+    """
+
+    events = np.full((len(current), len(EVENTS)), np.nan)
     for index, (visible, sunlit) in enumerate(current):
-        rise = _first_crossing(readouts[index, :, 0], visible, rising=True)
-        events[index, 0] = (rise - 1) * minutes
+        events[index, 0] = _first_crossing(readouts[index, :, 0], visible, rising=True) * minutes
         events[index, 2] = _first_crossing(readouts[index, :, 1], sunlit, rising=False) * minutes
         if not sunlit:
             events[index, 3] = _first_crossing(readouts[index, :, 1], sunlit, rising=True) * minutes
@@ -283,14 +322,8 @@ def _rollout_scores(predicted: np.ndarray, truth: np.ndarray, horizon_min: float
         if np.isnan(predicted[:, index]).all():
             continue
         known = np.isfinite(truth[:, index]) & ~np.isnan(predicted[:, index])
-        # Eclipse crossings include the final predicted state. Pass starts name
-        # the preceding contact interval, so their upper bound remains strict.
-        within = (
-            truth[:, index] <= horizon_min
-            if name.startswith("eclipse_")
-            else truth[:, index] < horizon_min
-        )
-        inside = known & within
+        # Every event is observed at a record, the final predicted one included.
+        inside = known & (truth[:, index] <= horizon_min)
         beyond = known & ~inside
         detected = np.isfinite(predicted[:, index])
         hits = inside & detected
